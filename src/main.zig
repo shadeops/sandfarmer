@@ -11,52 +11,78 @@ const res_x: u32 = 640/2;
 const res_y: u32 = 480/2;
 const num_pixels = res_x * res_y;
 
-fn update(rand: std.rand.Random, pixels: []ray.Color) bool {
-    var i: usize = res_x*(res_y-1);
+fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
     var ret = false;
-    while (i>0) {
-        i -= 1;
-        var row = @divFloor(i, res_x);
-        var col = i % res_x;
+    _ = sides;
+    var row: u32 = res_y-1;
+    while (row > 0 ) {
+        row -= 1;
+        var x: u32 = 0;
+        var decreasing_row = (rand.float(f32) > 0.5);
+        while (x < res_x) : (x += 1) {
+            var col: u32 = if (decreasing_row) res_x-x-1 else x;
+            var i = row*res_x + col;
 
-        var below = i + res_x;
-        var l_below = i + res_x - 1;
-        var r_below = i + res_x + 1;
-        //std.debug.print("{} {}\n", .{i, below});
-        if (pixels[i].a == 0)
-            continue;
+            var below = i + res_x;
+            var l_below = i + res_x - 1;
+            var r_below = i + res_x + 1;
+            //std.debug.print("{} {}\n", .{i, below});
+            if (pixels[i].a == 0)
+                continue;
 
-        if (pixels[below].a == 0) {
-            pixels[below] = pixels[i];
-            pixels[i] = ray.BLANK;
-            continue;
-        }
-        
-        if (rand.float(f32) > 0.5) {
-            if (col != 0 and pixels[l_below].a == 0) {
-                pixels[l_below] = pixels[i];
+            if (pixels[below].a == 0) {
+                pixels[below] = pixels[i];
                 pixels[i] = ray.BLANK;
                 continue;
             }
-            if ((col != (res_x-1)) and pixels[r_below].a == 0) {
-                pixels[r_below] = pixels[i];
-                pixels[i] = ray.BLANK;
-                continue;
+           
+            // Check left or right first?
+            if (rand.float(f32) > 0.5) {
+                // Check to the lower left
+                if ( !sides and col == 0 ) {
+                    pixels[i] = ray.BLANK;
+                    continue;
+                }
+                if (col != 0 and pixels[l_below].a == 0) {
+                    pixels[l_below] = pixels[i];
+                    pixels[i] = ray.BLANK;
+                    continue;
+                }
+                // Check the lower right
+                if ( !sides and col == (res_x-1)) {
+                    pixels[i] = ray.BLANK;
+                    continue;
+                }
+                if ( col != res_x-1 and pixels[r_below].a == 0 ) {
+                    pixels[r_below] = pixels[i];
+                    pixels[i] = ray.BLANK;
+                    continue;
+                }
+            } else {
+                // Check the lower right
+                if ( !sides and col == (res_x-1)) {
+                    pixels[i] = ray.BLANK;
+                    continue;
+                }
+                if ( col != res_x-1 and pixels[r_below].a == 0 ) {
+                    pixels[r_below] = pixels[i];
+                    pixels[i] = ray.BLANK;
+                    continue;
+                }
+                // Check to the lower left
+                if ( !sides and col == 0 ) {
+                    pixels[i] = ray.BLANK;
+                    continue;
+                }
+                if (col != 0 and pixels[l_below].a == 0) {
+                    pixels[l_below] = pixels[i];
+                    pixels[i] = ray.BLANK;
+                    continue;
+                }
             }
-        } else {
-            if ((col != (res_x-1)) and pixels[r_below].a == 0) {
-                pixels[r_below] = pixels[i];
-                pixels[i] = ray.BLANK;
-                continue;
+            if ( row < 20 ) {
+                ret = true;
             }
-            if (col != 0 and pixels[l_below].a == 0) {
-                pixels[l_below] = pixels[i];
-                pixels[i] = ray.BLANK;
-                continue;
-            }
-        }
-        if ( row < 20 ) {
-            ret = true;
         }
     }
     return ret;
@@ -116,9 +142,11 @@ const gamma_glsl =
 
 pub fn main() anyerror!void {
 
+    // Start data gathering
     var ctx = tractor.ThreadContext{};
     _ = try tractor.startGenerator(&ctx);
 
+    // Seed the random number generator
     var prng = std.rand.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
         std.os.getrandom(std.mem.asBytes(&seed)) catch { break :blk 42; };
@@ -129,22 +157,29 @@ pub fn main() anyerror!void {
     //ray.SetTraceLogLevel(ray.LOG_INFO);
     ray.SetConfigFlags(ray.FLAG_MSAA_4X_HINT); 
     ray.InitWindow(res_x*2, res_y*2, "sandfarm");
-    defer ray.CloseWindow();
+    ray.SetWindowState(ray.FLAG_WINDOW_ALWAYS_RUN);
 
     ray.SetTargetFPS(fps);
+    
+    // Get shader to apply a gamma correction to the texture
+    var gamma_shader = ray.LoadShaderFromMemory(null, gamma_glsl);
+    defer ray.UnloadShader(gamma_shader);
 
+    // Build the texture buffer which we'll use as our canvas
     var img = ray.GenImageColor(res_x, res_y, ray.BLANK);
     defer ray.UnloadImage(img);
+
     var tex = ray.LoadTextureFromImage(img);
     defer ray.UnloadTexture(tex);
     ray.SetTextureFilter(tex, ray.TEXTURE_FILTER_POINT);
     ray.SetTextureWrap(tex, ray.TEXTURE_WRAP_CLAMP);
 
+    // Set canvas to be blank by default
     var pixels = [_]ray.Color{ray.BLANK} ** (res_x*res_y);
     ray.UpdateTexture(tex, &pixels);
 
-    //const pix_factor: f32 = 360.0/(@intToFloat(f32, num_pixels));
-
+    // Setup a pool and reservoir to hold our randomly selected
+    // pixel placements
     var pool = [_]u32{0} ** res_x;
     var reservoir = [_]u32{0} ** res_x;
     for (pool) |_, i| {
@@ -155,10 +190,9 @@ pub fn main() anyerror!void {
     var msgs = tractor.MessageCounts{};
     var steps: u32 = fps;
 
-    var gamma_shader = ray.LoadShaderFromMemory(null, gamma_glsl);
-    defer ray.UnloadShader(gamma_shader);
-
+    // State of 
     var clear_steps: usize = 0;
+    var sides: bool = true;
 
     while (!ray.WindowShouldClose()) {
         ray.BeginDrawing();
@@ -176,10 +210,6 @@ pub fn main() anyerror!void {
         ray.EndShaderMode();
         ray.DrawFPS(10,10);
         ray.EndDrawing();
-        //for (pixels) |*pixel, i| {
-        //    _ = i;
-        //    pixel.* = ray.ColorFromHSV(@intToFloat(f32, i) * pix_factor, 1.0 ,1.0);
-        //}
         
         var new_msgs = tractor.getMessages(&ctx);
         if (new_msgs) |msg| {
@@ -222,6 +252,10 @@ pub fn main() anyerror!void {
             }
 
             var total = (step_msgs.active + step_msgs.err + step_msgs.done + step_msgs.blocked);
+            if (total >= res_x) {
+                std.debug.print("Warning: total pixels, {}, more than buffer.", .{total});
+                total = @minimum(total, res_x-1);
+            }
 
             if (total > 0) {
 
@@ -252,20 +286,29 @@ pub fn main() anyerror!void {
             }
         }
         
-        var clear = update(rand, pixels[0..]);
+        var clear = update(rand, sides, pixels[0..]);
         ray.UpdateTexture(tex, &pixels);
 
         if (clear) {
-            clear_steps = 60;
+            clear_steps = 400;
+            sides = false;
         }
-        if (clear_steps > 1) {
+        if (clear_steps > 0) {
             clear_steps -= 1;
-            var pix: u32 = 1;
-            while (pix < res_x) : (pix += 6) {
-                pixels[(res_x*res_y)-pix] = ray.BLANK;
-                pixels[(res_x*res_y)-(pix+1)] = ray.BLANK;
-                pixels[(res_x*res_y)-(pix+2)] = ray.BLANK;
+            //var pix: u32 = 1;
+            //while (pix < res_x) : (pix += 6) {
+            //    pixels[(res_x*res_y)-pix] = ray.BLANK;
+            //    pixels[(res_x*res_y)-(pix+1)] = ray.BLANK;
+            //    pixels[(res_x*res_y)-(pix+2)] = ray.BLANK;
+            //}
+            var pix: u32 = 0;
+            while (pix < res_x) : (pix += 1) {
+                var offset_start = (res_x*res_y-1);
+                if (rand.float(f32) > 0.5) {
+                    pixels[offset_start - pix] = ray.BLANK;
+                }
             }
+            if (clear_steps == 0) sides = true;
         }
         
         //if ( ray.IsMouseButtonPressed(0) ) {
