@@ -36,28 +36,21 @@ pub const MessageCounts = struct {
 pub const ThreadContext = struct {
     msgs: MessageCounts = .{},
     ready: bool = false,
+    size: u32 = 10,
+    prng: std.rand.Random = undefined,
 };
 
-var prng = std.rand.DefaultPrng.init(42);
-const rand = prng.random();
-
-fn gatherData(msgs: *MessageCounts) void {
-    //    var prng = std.rand.DefaultPrng.init(blk: {
-    //        var seed: u64 = undefined;
-    //        std.os.getrandom(std.mem.asBytes(&seed)) catch { break :blk 42; };
-    //        break :blk 42;
-    //    });
-    //    const rand = prng.random();
-    msgs.active = rand.intRangeAtMost(u32, 0, 1000);
-    msgs.blocked = rand.intRangeAtMost(u32, 0, 20);
-    msgs.done = rand.intRangeAtMost(u32, 0, 1000);
-    msgs.err = rand.intRangeAtMost(u32, 0, 100);
+fn gatherData(ctx: *ThreadContext) void {
+    ctx.msgs.active = ctx.prng.intRangeAtMost(u32, 0, 10 * ctx.size);
+    ctx.msgs.blocked = ctx.prng.intRangeAtMost(u32, 0, 1 * ctx.size);
+    ctx.msgs.done = ctx.prng.intRangeAtMost(u32, 0, 10 * ctx.size);
+    ctx.msgs.err = ctx.prng.intRangeAtMost(u32, 0, 5 * ctx.size);
 }
 
 fn callback(ctx: *ThreadContext) void {
     while (true) {
         while (@atomicLoad(bool, &ctx.ready, .Acquire)) {}
-        gatherData(&ctx.msgs);
+        gatherData(ctx);
         @atomicStore(bool, &ctx.ready, true, .Release);
         std.time.sleep(1 * std.time.ns_per_s);
     }

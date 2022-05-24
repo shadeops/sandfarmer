@@ -26,7 +26,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
             var below = i + res_x;
             var l_below = i + res_x - 1;
             var r_below = i + res_x + 1;
-            
+
             if (pixels[i].a == 0)
                 continue;
 
@@ -80,7 +80,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     continue;
                 }
             }
-            if (row < 20) {
+            if (row < 10) {
                 ret = true;
             }
         }
@@ -143,8 +143,15 @@ const gamma_glsl =
 pub fn main() anyerror!void {
 
     // Start data gathering
-    var ctx = tractor.ThreadContext{};
-    _ = try tractor.startGenerator(&ctx);
+    var ctxs = [_]tractor.ThreadContext{.{}} ** 4;
+    for (ctxs) |*ctx, i| {
+        ctx.prng = std.rand.DefaultPrng.init(i).random();
+        _ = try tractor.startGenerator(ctx);
+    }
+    ctxs[0].size = 1;
+    ctxs[1].size = 10;
+    ctxs[2].size = 20;
+    ctxs[3].size = 50;
 
     // Seed the random number generator
     var prng = std.rand.DefaultPrng.init(blk: {
@@ -182,15 +189,14 @@ pub fn main() anyerror!void {
 
     // Setup a pool and reservoir to hold our randomly selected
     // pixel placements
-    var pool = [_]u32{0} ** res_x;
-    var reservoir = [_]u32{0} ** res_x;
+    var pool = [_]u32{0} ** (res_x / 4);
     for (pool) |_, i| {
         pool[i] = @intCast(u32, i);
-        reservoir[i] = @intCast(u32, i);
     }
+    var reservoir = [_]u32{0} ** (res_x / 4);
 
-    var msgs = tractor.MessageCounts{};
-    var steps: u32 = fps;
+    var msgs = [_]tractor.MessageCounts{.{}} ** 4;
+    var steps = [_]u32{fps} ** 4;
 
     // State of
     var clear_steps: usize = 0;
@@ -213,88 +219,92 @@ pub fn main() anyerror!void {
         ray.DrawFPS(10, 10);
         ray.EndDrawing();
 
-        var new_msgs = tractor.getMessages(&ctx);
-        if (new_msgs) |msg| {
-            msgs.add(msg);
-            steps = fps;
-        }
-
-        if (msgs.hasMsgs() and steps > 0) {
-            defer steps -= 1;
-
-            var step_msgs = tractor.MessageCounts{};
-
-            var msg_pct: f32 = undefined;
-            if (msgs.active > 0) {
-                msg_pct = @intToFloat(f32, msgs.active) / @intToFloat(f32, steps);
-                step_msgs.active = @floatToInt(u32, msg_pct);
-                if (@mod(msg_pct, 1.0) > rand.float(f32))
-                    step_msgs.active += 1;
+        for (ctxs) |*ctx, i| {
+            var ctx_msgs = tractor.getMessages(ctx);
+            if (ctx_msgs) |msg| {
+                msgs[i].add(msg);
+                steps[i] = fps;
             }
 
-            if (msgs.blocked > 0) {
-                msg_pct = @intToFloat(f32, msgs.blocked) / @intToFloat(f32, steps);
-                step_msgs.blocked = @floatToInt(u32, msg_pct);
-                if (@mod(msg_pct, 1.0) > rand.float(f32))
-                    step_msgs.blocked += 1;
-            }
+            if (msgs[i].hasMsgs() and steps[i] > 0) {
+                defer steps[i] -= 1;
 
-            if (msgs.err > 0) {
-                msg_pct = @intToFloat(f32, msgs.err) / @intToFloat(f32, steps);
-                step_msgs.err = @floatToInt(u32, msg_pct);
-                if (@mod(msg_pct, 1.0) > rand.float(f32))
-                    step_msgs.err += 1;
-            }
+                var step_msgs = tractor.MessageCounts{};
 
-            if (msgs.done > 0) {
-                msg_pct = @intToFloat(f32, msgs.done) / @intToFloat(f32, steps);
-                step_msgs.done = @floatToInt(u32, msg_pct);
-                if (@mod(msg_pct, 1.0) > rand.float(f32))
-                    step_msgs.done += 1;
-            }
-
-            var total = (step_msgs.active + step_msgs.err + step_msgs.done + step_msgs.blocked);
-            if (total >= res_x) {
-                std.debug.print("Warning: total pixels, {}, more than buffer.", .{total});
-                total = @minimum(total, res_x - 1);
-            }
-
-            if (total > 0) {
-                reservoirSample(rand, pool[0..], reservoir[0..total]);
-                shuffle(rand, reservoir[0..total]);
-
-                var start: u32 = 0;
-                for (reservoir[start .. step_msgs.err + start]) |x| {
-                    pixels[x] = ray.RED;
+                var msg_pct: f32 = undefined;
+                if (msgs[i].active > 0) {
+                    msg_pct = @intToFloat(f32, msgs[i].active) / @intToFloat(f32, steps[i]);
+                    step_msgs.active = @floatToInt(u32, msg_pct);
+                    if (@mod(msg_pct, 1.0) > rand.float(f32))
+                        step_msgs.active += 1;
                 }
-                start += step_msgs.err;
-                for (reservoir[start .. step_msgs.active + start]) |x| {
-                    //pixels[x] = ray.LIME;
-                    pixels[x] = ray.ColorFromHSV(
-                        125.0,
-                        rand.float(f32) * 0.15 + 0.6,
-                        rand.float(f32) * 0.45 + 0.35,
-                    );
+
+                if (msgs[i].blocked > 0) {
+                    msg_pct = @intToFloat(f32, msgs[i].blocked) / @intToFloat(f32, steps[i]);
+                    step_msgs.blocked = @floatToInt(u32, msg_pct);
+                    if (@mod(msg_pct, 1.0) > rand.float(f32))
+                        step_msgs.blocked += 1;
                 }
-                start += step_msgs.active;
-                for (reservoir[start .. step_msgs.done + start]) |x| {
-                    //pixels[x] = ray.SKYBLUE;
-                    pixels[x] = ray.ColorFromHSV(
-                        215.0,
-                        rand.float(f32) * 0.15 + 0.6,
-                        rand.float(f32) * 0.45 + 0.35,
-                    );
+
+                if (msgs[i].err > 0) {
+                    msg_pct = @intToFloat(f32, msgs[i].err) / @intToFloat(f32, steps[i]);
+                    step_msgs.err = @floatToInt(u32, msg_pct);
+                    if (@mod(msg_pct, 1.0) > rand.float(f32))
+                        step_msgs.err += 1;
                 }
-                start += step_msgs.done;
-                for (reservoir[start .. step_msgs.blocked + start]) |x| {
-                    //pixels[x] = ray.ORANGE;
-                    pixels[x] = ray.ColorFromHSV(
-                        50.0,
-                        rand.float(f32) * 0.15 + 0.6,
-                        rand.float(f32) * 0.45 + 0.35,
-                    );
+
+                if (msgs[i].done > 0) {
+                    msg_pct = @intToFloat(f32, msgs[i].done) / @intToFloat(f32, steps[i]);
+                    step_msgs.done = @floatToInt(u32, msg_pct);
+                    if (@mod(msg_pct, 1.0) > rand.float(f32))
+                        step_msgs.done += 1;
                 }
-                msgs.sub(step_msgs);
+
+                var total = (step_msgs.active + step_msgs.err + step_msgs.done + step_msgs.blocked);
+                if (total >= res_x / 4) {
+                    std.debug.print("Warning: total pixels, {}, more than buffer.", .{total});
+                    total = @minimum(total, res_x / 4 - 1);
+                }
+
+                if (total > 0) {
+                    reservoirSample(rand, pool[0..], reservoir[0..total]);
+                    shuffle(rand, reservoir[0..total]);
+
+                    var pixel_offset = (i * res_x / 4);
+
+                    var start: u32 = 0;
+                    for (reservoir[start .. step_msgs.err + start]) |x| {
+                        pixels[x + pixel_offset] = ray.RED;
+                    }
+                    start += step_msgs.err;
+                    for (reservoir[start .. step_msgs.active + start]) |x| {
+                        //pixels[x] = ray.LIME;
+                        pixels[x + pixel_offset] = ray.ColorFromHSV(
+                            125.0,
+                            rand.float(f32) * 0.15 + 0.6,
+                            rand.float(f32) * 0.45 + 0.35,
+                        );
+                    }
+                    start += step_msgs.active;
+                    for (reservoir[start .. step_msgs.done + start]) |x| {
+                        //pixels[x] = ray.SKYBLUE;
+                        pixels[x + pixel_offset] = ray.ColorFromHSV(
+                            215.0,
+                            rand.float(f32) * 0.15 + 0.6,
+                            rand.float(f32) * 0.45 + 0.35,
+                        );
+                    }
+                    start += step_msgs.done;
+                    for (reservoir[start .. step_msgs.blocked + start]) |x| {
+                        //pixels[x] = ray.ORANGE;
+                        pixels[x + pixel_offset] = ray.ColorFromHSV(
+                            50.0,
+                            rand.float(f32) * 0.15 + 0.6,
+                            rand.float(f32) * 0.45 + 0.35,
+                        );
+                    }
+                    msgs[i].sub(step_msgs);
+                }
             }
         }
 
