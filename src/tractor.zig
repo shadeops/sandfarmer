@@ -31,24 +31,23 @@ pub const MessageCounts = struct {
     pub fn hasMsgs(self: Self) bool {
         return (self.active | self.blocked | self.done | self.err) != 0;
     }
-
 };
 
 pub const ThreadContext = struct {
     msgs: MessageCounts = .{},
     ready: bool = false,
 };
-    
+
 var prng = std.rand.DefaultPrng.init(42);
 const rand = prng.random();
 
 fn gatherData(msgs: *MessageCounts) void {
-//    var prng = std.rand.DefaultPrng.init(blk: {
-//        var seed: u64 = undefined;
-//        std.os.getrandom(std.mem.asBytes(&seed)) catch { break :blk 42; };
-//        break :blk 42;
-//    });
-//    const rand = prng.random();
+    //    var prng = std.rand.DefaultPrng.init(blk: {
+    //        var seed: u64 = undefined;
+    //        std.os.getrandom(std.mem.asBytes(&seed)) catch { break :blk 42; };
+    //        break :blk 42;
+    //    });
+    //    const rand = prng.random();
     msgs.active = rand.intRangeAtMost(u32, 0, 1000);
     msgs.blocked = rand.intRangeAtMost(u32, 0, 20);
     msgs.done = rand.intRangeAtMost(u32, 0, 1000);
@@ -56,7 +55,6 @@ fn gatherData(msgs: *MessageCounts) void {
 }
 
 fn callback(ctx: *ThreadContext) void {
-
     while (true) {
         while (@atomicLoad(bool, &ctx.ready, .Acquire)) {}
         gatherData(&ctx.msgs);
