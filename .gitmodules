@@ -1,0 +1,6 @@
+[submodule "ext/curl"]
+	path = ext/curl
+	url = https://github.com/curl/curl.git
+[submodule "ext/raylib"]
+	path = ext/raylib
+	url = https://github.com/raysan5/raylib.git
