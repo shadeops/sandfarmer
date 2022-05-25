@@ -1,15 +1,18 @@
 const std = @import("std");
+const randmsgs = @import("randmsgs.zig");
 const tractor = @import("tractor.zig");
+
+const MessageCounts = @import("mbox.zig").MessageCounts;
 
 const ray = @cImport(
     @cInclude("raylib.h"),
 );
 
 const fps: i32 = 60;
-const inv_fps: f32 = 1.0 / @intToFloat(f32, fps);
-const res_x: u32 = 640 / 2;
-const res_y: u32 = 480 / 2;
-const num_pixels = res_x * res_y;
+const res_x: u32 = 320;
+const res_y: u32 = 240;
+const window_scale: u32 = 3;
+const sections: u32 = 4;
 
 fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
     var ret = false;
@@ -141,17 +144,53 @@ const gamma_glsl =
 ;
 
 pub fn main() anyerror!void {
+    var arena0 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena1 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena2 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena3 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena0.deinit();
+    defer arena1.deinit();
+    defer arena2.deinit();
+    defer arena3.deinit();
+
+    var allocator0 = arena0.allocator();
+    var allocator1 = arena1.allocator();
+    var allocator2 = arena2.allocator();
+    var allocator3 = arena3.allocator();
 
     // Start data gathering
-    var ctxs = [_]tractor.ThreadContext{.{}} ** 4;
-    for (ctxs) |*ctx, i| {
-        ctx.prng = std.rand.DefaultPrng.init(i).random();
-        _ = try tractor.startGenerator(ctx);
+    //var ctxs = [_]randmsgs.Context{.{}} ** sections;
+    //for (ctxs) |*ctx, i| {
+    //    ctx.prng = std.rand.DefaultPrng.init(i).random();
+    //    _ = try ctx.startThread();
+    //}
+    //ctxs[0].size = 1;
+    //ctxs[1].size = 10;
+    //ctxs[2].size = 20;
+    //ctxs[3].size = 50;
+
+    var ctxs = [_]tractor.Context{undefined} ** sections;
+    ctxs[0] = tractor.Context{
+        .allocator = allocator0,
+        .url = "http://127.0.0.1:3000/Tractor/monitor",
+    };
+    ctxs[1] = tractor.Context{
+        .allocator = allocator1,
+        .url = "http://127.0.0.1:3001/Tractor/monitor",
+    };
+    ctxs[2] = tractor.Context{
+        .allocator = allocator2,
+        .url = "http://127.0.0.1:3002/Tractor/monitor",
+    };
+    ctxs[3] = tractor.Context{
+        .allocator = allocator3,
+        .url = "http://127.0.0.1:3003/Tractor/monitor",
+    };
+    for (ctxs) |*ctx| {
+        _ = try ctx.startThread();
     }
-    ctxs[0].size = 1;
-    ctxs[1].size = 10;
-    ctxs[2].size = 20;
-    ctxs[3].size = 50;
+
+    //"http://tractor/Tractor/monitor"
 
     // Seed the random number generator
     var prng = std.rand.DefaultPrng.init(blk: {
@@ -165,7 +204,7 @@ pub fn main() anyerror!void {
 
     //ray.SetTraceLogLevel(ray.LOG_INFO);
     ray.SetConfigFlags(ray.FLAG_MSAA_4X_HINT);
-    ray.InitWindow(res_x * 2, res_y * 2, "sandfarm");
+    ray.InitWindow(res_x * window_scale, res_y * window_scale, "sandfarm");
     ray.SetWindowState(ray.FLAG_WINDOW_ALWAYS_RUN);
 
     ray.SetTargetFPS(fps);
@@ -189,14 +228,14 @@ pub fn main() anyerror!void {
 
     // Setup a pool and reservoir to hold our randomly selected
     // pixel placements
-    var pool = [_]u32{0} ** (res_x / 4);
+    var pool = [_]u32{0} ** (res_x / sections);
     for (pool) |_, i| {
         pool[i] = @intCast(u32, i);
     }
-    var reservoir = [_]u32{0} ** (res_x / 4);
+    var reservoir = [_]u32{0} ** (res_x / sections);
 
-    var msgs = [_]tractor.MessageCounts{.{}} ** 4;
-    var steps = [_]u32{fps} ** 4;
+    var msgs = [_]MessageCounts{.{}} ** sections;
+    var steps = [_]u32{fps} ** sections;
 
     // State of
     var clear_steps: usize = 0;
@@ -209,10 +248,10 @@ pub fn main() anyerror!void {
         ray.DrawTextureTiled(
             tex,
             .{ .x = 0, .y = 0, .width = res_x, .height = res_y },
-            .{ .x = 0, .y = 0, .width = res_x * 2, .height = res_y * 2 },
+            .{ .x = 0, .y = 0, .width = res_x * window_scale, .height = res_y * window_scale },
             .{ .x = 0, .y = 0 },
             0.0,
-            2.0,
+            window_scale,
             ray.WHITE,
         );
         ray.EndShaderMode();
@@ -220,7 +259,7 @@ pub fn main() anyerror!void {
         ray.EndDrawing();
 
         for (ctxs) |*ctx, i| {
-            var ctx_msgs = tractor.getMessages(ctx);
+            var ctx_msgs = ctx.getMessages();
             if (ctx_msgs) |msg| {
                 msgs[i].add(msg);
                 steps[i] = fps;
@@ -229,7 +268,7 @@ pub fn main() anyerror!void {
             if (msgs[i].hasMsgs() and steps[i] > 0) {
                 defer steps[i] -= 1;
 
-                var step_msgs = tractor.MessageCounts{};
+                var step_msgs = MessageCounts{};
 
                 var msg_pct: f32 = undefined;
                 if (msgs[i].active > 0) {
@@ -261,16 +300,16 @@ pub fn main() anyerror!void {
                 }
 
                 var total = (step_msgs.active + step_msgs.err + step_msgs.done + step_msgs.blocked);
-                if (total >= res_x / 4) {
+                if (total >= res_x / sections) {
                     std.debug.print("Warning: total pixels, {}, more than buffer.", .{total});
-                    total = @minimum(total, res_x / 4 - 1);
+                    total = @minimum(total, res_x / sections - 1);
                 }
 
                 if (total > 0) {
                     reservoirSample(rand, pool[0..], reservoir[0..total]);
                     shuffle(rand, reservoir[0..total]);
 
-                    var pixel_offset = (i * res_x / 4);
+                    var pixel_offset = (i * res_x / sections);
 
                     var start: u32 = 0;
                     for (reservoir[start .. step_msgs.err + start]) |x| {
@@ -312,7 +351,7 @@ pub fn main() anyerror!void {
         ray.UpdateTexture(tex, &pixels);
 
         if (clear) {
-            clear_steps = 400;
+            clear_steps = 360;
             sides = false;
         }
         if (clear_steps > 0) {

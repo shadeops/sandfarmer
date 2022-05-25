@@ -12,6 +12,7 @@ fn buildCurl(b: *std.build.Builder) *std.build.RunStep {
         "-DHTTP_ONLY=ON",
         "-DBUILD_CURL_EXE=OFF",
         "-DBUILD_SHARED_LIBS=OFF",
+        "-DCURL_ENABLE_SSL=OFF",
         "-DCMAKE_USE_OPENSSL=OFF",
         "-DCMAKE_USE_LIBSSH2=OFF",
         "-DCMAKE_USE_LIBSSH=OFF",
@@ -33,21 +34,21 @@ pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
-    //const build_ext = b.step("build-ext", "Build External Dependencies");
-    //build_ext.dependOn(&buildCurl(b).step);
+    const build_ext = b.step("build-ext", "Build External Dependencies");
+    build_ext.dependOn(&buildCurl(b).step);
 
     const raylib_step = raylib.addRaylib(b, target);
     raylib_step.setOutputDir("ext/raylib/src");
 
-    const exe = b.addExecutable("tractory", "src/main.zig");
+    const exe = b.addExecutable("sandfarm", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.step.dependOn(&raylib_step.step);
     exe.addIncludeDir("ext/raylib/src");
     exe.addObjectFile("ext/raylib/src/libraylib.a");
-    //exe.addIncludeDir("ext/curl/include");
-    //exe.addLibPath("ext/curl/build/lib");
-    //exe.linkSystemLibraryName("curl");
+    exe.addIncludeDir("ext/curl/include");
+    exe.addLibPath("ext/curl/build/lib");
+    exe.linkSystemLibraryName("curl");
     exe.linkLibC();
     exe.install();
 
