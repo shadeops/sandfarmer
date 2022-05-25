@@ -13,9 +13,8 @@ fn buildCurl(b: *std.build.Builder) *std.build.RunStep {
         "-DBUILD_CURL_EXE=OFF",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DCURL_ENABLE_SSL=OFF",
-        "-DCMAKE_USE_OPENSSL=OFF",
-        "-DCMAKE_USE_LIBSSH2=OFF",
-        "-DCMAKE_USE_LIBSSH=OFF",
+        "-DCURL_USE_LIBSSH2=OFF",
+        "-DCURL_USE_LIBSSH=OFF",
         "-DCURL_ZLIB=OFF",
     });
     const cmake_build = b.addSystemCommand(&[_][]const u8{
