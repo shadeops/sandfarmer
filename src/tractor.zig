@@ -40,14 +40,12 @@ pub const Context = struct {
 
             std.time.sleep(1 * std.time.ns_per_s);
         }
-        std.debug.print("thread done\n", .{});
     }
 
     fn tractorLogin(self: *Self) !void {
         //std.debug.print("Logging into Tractor\n", .{});
         var buf: [64:0]u8 = undefined;
         var post = try std.fmt.bufPrintZ(buf[0..], "q=login&user={s}", .{std.os.getenv("USER")});
-        std.debug.print("post: {s}\n", .{post});
         var response = try postTractor(self.allocator, post, self.url);
         defer response.deinit();
 
