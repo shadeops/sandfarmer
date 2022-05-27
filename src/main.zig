@@ -14,6 +14,8 @@ const res_y: u32 = 240;
 const window_scale: u32 = 3;
 const sections: u32 = 4;
 
+const debug = false;
+
 fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
     var ret = false;
     _ = sides;
@@ -34,6 +36,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                 continue;
 
             if (pixels[below].a == 0) {
+                if (debug) std.debug.print("Moving {} below to {}\n", .{i, below});
                 pixels[below] = pixels[i];
                 pixels[i] = ray.BLANK;
                 continue;
@@ -47,6 +50,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     continue;
                 }
                 if (col != 0 and pixels[l_below].a == 0) {
+                    if (debug) std.debug.print("Moving {} below left to {}\n", .{i, l_below});
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
@@ -57,6 +61,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     continue;
                 }
                 if (col != res_x - 1 and pixels[r_below].a == 0) {
+                    if (debug) std.debug.print("Moving {} below right to {}\n", .{i, r_below});
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
@@ -67,7 +72,8 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != res_x - 1 and pixels[r_below].a == 0) {
+                if ((col != res_x - 1) and pixels[r_below].a == 0) {
+                    if (debug) std.debug.print("Moving {} below right to {}\n", .{i, r_below});
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
@@ -78,6 +84,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     continue;
                 }
                 if (col != 0 and pixels[l_below].a == 0) {
+                    if (debug) std.debug.print("Moving {} below left to {}\n", .{i, l_below});
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
@@ -193,13 +200,7 @@ pub fn main() anyerror!void {
     //"http://tractor/Tractor/monitor"
 
     // Seed the random number generator
-    var prng = std.rand.DefaultPrng.init(blk: {
-        var seed: u64 = undefined;
-        std.os.getrandom(std.mem.asBytes(&seed)) catch {
-            break :blk 42;
-        };
-        break :blk 42;
-    });
+    var prng = std.rand.DefaultPrng.init(42);
     const rand = prng.random();
 
     //ray.SetTraceLogLevel(ray.LOG_INFO);
@@ -301,7 +302,7 @@ pub fn main() anyerror!void {
 
                 var total = (step_msgs.active + step_msgs.err + step_msgs.done + step_msgs.blocked);
                 if (total >= res_x / sections) {
-                    std.debug.print("Warning: total pixels, {}, more than buffer.", .{total});
+                    std.debug.print("Warning: total pixels, {}, more than buffer.\n", .{total});
                     total = @minimum(total, res_x / sections - 1);
                 }
 
@@ -380,4 +381,24 @@ pub fn main() anyerror!void {
         //}
 
     }
+}
+
+test "pixel_update" {
+    std.debug.print("\n", .{});
+    var prng = std.rand.DefaultPrng.init(42);
+    const rand = prng.random();
+    var pixels = [_]ray.Color{ray.BLANK} ** (res_x * res_y);
+    pixels[res_x * (res_y-2) + 5] = ray.WHITE;
+    pixels[res_x * (res_y-3) + 5] = ray.WHITE;
+    pixels[res_x * (res_y-4) + 5] = ray.WHITE;
+    try std.testing.expect( pixels[res_x * (res_y-2) + 5].a == 255);
+    _ = update(rand, true, pixels[0..]);
+    try std.testing.expect( pixels[res_x * (res_y-3) + 5].a == 255);
+    try std.testing.expect( pixels[res_x * (res_y-2) + 5].a == 255);
+    try std.testing.expect( pixels[res_x * (res_y-1) + 5].a == 255);
+    std.debug.print("Second update\n", .{});
+    _ = update(rand, true, pixels[0..]);
+    try std.testing.expect( pixels[res_x * (res_y-2) + 6].a == 255);
+    try std.testing.expect( pixels[res_x * (res_y-2) + 5].a == 255);
+    try std.testing.expect( pixels[res_x * (res_y-1) + 5].a == 255);
 }
