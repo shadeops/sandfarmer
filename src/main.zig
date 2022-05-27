@@ -22,25 +22,28 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
     var row: u32 = res_y - 1;
     while (row > 0) {
         row -= 1;
-        var x: u32 = 0;
+        var x: u32 = 0; // counter
+        var i: u32 = 0; // pixel index
+        var col: u32 = 0;
         var decreasing_row = (rand.float(f32) > 0.5);
+
+        x = 0;
         while (x < res_x) : (x += 1) {
-            var col: u32 = if (decreasing_row) res_x - x - 1 else x;
-            var i = row * res_x + col;
+            col = if (decreasing_row) (res_x - x) - 1 else x;
+            i = row * res_x + col;
+
+            if (pixels[i].a == 0) continue;
 
             var below = i + res_x;
-            var l_below = i + res_x - 1;
-            var r_below = i + res_x + 1;
-
-            if (pixels[i].a == 0)
-                continue;
-
             if (pixels[below].a == 0) {
-                if (debug) std.debug.print("Moving {} below to {}\n", .{i, below});
+                if (debug) std.debug.print("Moving {} below to {}\n", .{ i, below });
                 pixels[below] = pixels[i];
                 pixels[i] = ray.BLANK;
                 continue;
             }
+            
+            var l_below = i + res_x - 1;
+            var r_below = i + res_x + 1;
 
             // Check left or right first?
             if (rand.float(f32) > 0.5) {
@@ -50,7 +53,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     continue;
                 }
                 if (col != 0 and pixels[l_below].a == 0) {
-                    if (debug) std.debug.print("Moving {} below left to {}\n", .{i, l_below});
+                    if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
@@ -61,7 +64,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     continue;
                 }
                 if (col != res_x - 1 and pixels[r_below].a == 0) {
-                    if (debug) std.debug.print("Moving {} below right to {}\n", .{i, r_below});
+                    if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
@@ -73,7 +76,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     continue;
                 }
                 if ((col != res_x - 1) and pixels[r_below].a == 0) {
-                    if (debug) std.debug.print("Moving {} below right to {}\n", .{i, r_below});
+                    if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
@@ -84,7 +87,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     continue;
                 }
                 if (col != 0 and pixels[l_below].a == 0) {
-                    if (debug) std.debug.print("Moving {} below left to {}\n", .{i, l_below});
+                    if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
@@ -357,12 +360,17 @@ pub fn main() anyerror!void {
         }
         if (clear_steps > 0) {
             clear_steps -= 1;
-            //var pix: u32 = 1;
-            //while (pix < res_x) : (pix += 6) {
-            //    pixels[(res_x*res_y)-pix] = ray.BLANK;
-            //    pixels[(res_x*res_y)-(pix+1)] = ray.BLANK;
-            //    pixels[(res_x*res_y)-(pix+2)] = ray.BLANK;
-            //}
+            if (clear_steps == 0) sides = true;
+
+            // Binned holes
+            // var pix: u32 = 1;
+            // while (pix < res_x) : (pix += 6) {
+            //     pixels[(res_x*res_y)-pix] = ray.BLANK;
+            //     pixels[(res_x*res_y)-(pix+1)] = ray.BLANK;
+            //     pixels[(res_x*res_y)-(pix+2)] = ray.BLANK;
+            // }
+
+            // Randomized holes
             var pix: u32 = 0;
             while (pix < res_x) : (pix += 1) {
                 var offset_start = (res_x * res_y - 1);
@@ -370,7 +378,6 @@ pub fn main() anyerror!void {
                     pixels[offset_start - pix] = ray.BLANK;
                 }
             }
-            if (clear_steps == 0) sides = true;
         }
 
         //if ( ray.IsMouseButtonPressed(0) ) {
@@ -388,17 +395,17 @@ test "pixel_update" {
     var prng = std.rand.DefaultPrng.init(42);
     const rand = prng.random();
     var pixels = [_]ray.Color{ray.BLANK} ** (res_x * res_y);
-    pixels[res_x * (res_y-2) + 5] = ray.WHITE;
-    pixels[res_x * (res_y-3) + 5] = ray.WHITE;
-    pixels[res_x * (res_y-4) + 5] = ray.WHITE;
-    try std.testing.expect( pixels[res_x * (res_y-2) + 5].a == 255);
+    pixels[res_x * (res_y - 2) + 5] = ray.WHITE;
+    pixels[res_x * (res_y - 3) + 5] = ray.WHITE;
+    pixels[res_x * (res_y - 4) + 5] = ray.WHITE;
+    try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);
     _ = update(rand, true, pixels[0..]);
-    try std.testing.expect( pixels[res_x * (res_y-3) + 5].a == 255);
-    try std.testing.expect( pixels[res_x * (res_y-2) + 5].a == 255);
-    try std.testing.expect( pixels[res_x * (res_y-1) + 5].a == 255);
+    try std.testing.expect(pixels[res_x * (res_y - 3) + 5].a == 255);
+    try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);
+    try std.testing.expect(pixels[res_x * (res_y - 1) + 5].a == 255);
     std.debug.print("Second update\n", .{});
     _ = update(rand, true, pixels[0..]);
-    try std.testing.expect( pixels[res_x * (res_y-2) + 6].a == 255);
-    try std.testing.expect( pixels[res_x * (res_y-2) + 5].a == 255);
-    try std.testing.expect( pixels[res_x * (res_y-1) + 5].a == 255);
+    try std.testing.expect(pixels[res_x * (res_y - 1) + 6].a == 255);
+    try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);
+    try std.testing.expect(pixels[res_x * (res_y - 1) + 5].a == 255);
 }
