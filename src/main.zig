@@ -155,12 +155,12 @@ const gamma_glsl =
 
 pub fn main() anyerror!void {
     var arena0 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var arena1 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var arena2 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var arena3 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena0.deinit();
+    var arena1 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena1.deinit();
+    var arena2 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena2.deinit();
+    var arena3 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena3.deinit();
 
     var allocator0 = arena0.allocator();
@@ -304,8 +304,30 @@ pub fn main() anyerror!void {
                 }
 
                 var total = (step_msgs.active + step_msgs.err + step_msgs.done + step_msgs.blocked);
-                if (total >= res_x / sections) {
+                if (total > res_x / sections) {
                     std.debug.print("Warning: total pixels, {}, more than buffer.\n", .{total});
+                    // Here we will cull any points that didn't fit in the current step.
+                    // The total msgs[i] will still contain the non-culled points since the
+                    // resultanting step_msg is subtracted msgs[i], see * reference_note_1
+
+                    // NOTES:
+                    // * A better approach is to remove by a weighted average so higher values
+                    // are removed more frequently
+                    // * An even better approach is to not cause an overage in the first place
+                    // though in practice that seems a rare occurance.
+                    // * Another option is to move the step buffering into the threaded msg getters
+                    // this would free the main thread up from having to figure out what to do.
+                    var overage: u32 = total - (res_x/sections);
+                    while (overage > 0) {
+                        overage -= 1;
+                        switch (overage % 4) {
+                            0 => step_msgs.active -= 1,
+                            1 => step_msgs.done -= 1,
+                            2 => step_msgs.err -= 1,
+                            3 => step_msgs.blocked -= 1,
+                            else => unreachable,
+                        }
+                    }
                     total = @minimum(total, res_x / sections - 1);
                 }
 
@@ -346,6 +368,7 @@ pub fn main() anyerror!void {
                             rand.float(f32) * 0.45 + 0.35,
                         );
                     }
+                    // * reference_note_1
                     msgs[i].sub(step_msgs);
                 }
             }
@@ -408,4 +431,9 @@ test "pixel_update" {
     try std.testing.expect(pixels[res_x * (res_y - 1) + 6].a == 255);
     try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);
     try std.testing.expect(pixels[res_x * (res_y - 1) + 5].a == 255);
+}
+
+test "range reminder" {
+    var foo = [_]u32{0}**10;
+    for (foo[0..10]) |_| {}
 }
