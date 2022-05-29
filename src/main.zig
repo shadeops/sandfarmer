@@ -244,6 +244,7 @@ pub fn main() anyerror!void {
     // State of
     var clear_steps: usize = 0;
     var sides: bool = true;
+    var paused: bool = false;
 
     while (!ray.WindowShouldClose()) {
         ray.BeginDrawing();
@@ -375,12 +376,15 @@ pub fn main() anyerror!void {
         }
 
         var clear = update(rand, sides, pixels[0..]);
-        ray.UpdateTexture(tex, &pixels);
+        if (!paused) {
+            ray.UpdateTexture(tex, &pixels);
+        }
 
         if (clear) {
             clear_steps = 360;
             sides = false;
         }
+
         if (clear_steps > 0) {
             clear_steps -= 1;
             if (clear_steps == 0) sides = true;
@@ -409,6 +413,9 @@ pub fn main() anyerror!void {
         //    var offset = @intCast(usize, res_x*y + x);
         //    pixels[offset] = ray.RED;
         //}
+
+        // Debugging pause, still keeps running in background
+        if (ray.IsKeyPressed(32)) paused = !paused;
 
     }
 }
