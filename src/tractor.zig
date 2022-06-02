@@ -1,5 +1,5 @@
 const std = @import("std");
-const url = @import("url.zig");
+const curl = @import("curl.zig");
 
 const MessageCounts = @import("mbox.zig").MessageCounts;
 
@@ -43,7 +43,7 @@ pub const Context = struct {
         //std.debug.print("Logging into Tractor\n", .{});
         var buf: [64:0]u8 = undefined;
         var post = try std.fmt.bufPrintZ(buf[0..], "q=login&user={s}", .{std.os.getenv("USER")});
-        var response = try url.request(self.allocator, post, self.url);
+        var response = try curl.request(self.allocator, post, self.url);
         defer response.deinit();
 
         var p = std.json.Parser.init(self.allocator, false);
@@ -60,7 +60,7 @@ pub const Context = struct {
     pub fn queryTractor(self: *Self) !?MessageCounts {
         var buf: [128:0]u8 = undefined;
         var post = try std.fmt.bufPrintZ(buf[0..], "q=subscribe&jids=0&tsid={s}", .{self.tsid.?});
-        var response = try url.request(self.allocator, post, self.url);
+        var response = try curl.request(self.allocator, post, self.url);
         defer response.deinit();
         //std.debug.print("\n\n{s}\n\n", .{response.items});
         return parseResponse(self.allocator, response);
