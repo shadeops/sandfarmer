@@ -4,10 +4,9 @@ const curl = @cImport(
     @cInclude("curl/curl.h"),
 );
 
-
-pub fn request (
+pub fn request(
     allocator: std.mem.Allocator,
-    post: []const u8,
+    post: ?[]const u8,
     url: []const u8,
 ) !std.ArrayList(u8) {
 
@@ -30,8 +29,10 @@ pub fn request (
     if (curl.curl_easy_setopt(handle, curl.CURLOPT_URL, url.ptr) != curl.CURLE_OK)
         return error.CouldNotSetURL;
 
-    if (curl.curl_easy_setopt(handle, curl.CURLOPT_POSTFIELDS, post.ptr) != curl.CURLE_OK)
-        return error.CouldNotSetPost;
+    if (post != null) {
+        if (curl.curl_easy_setopt(handle, curl.CURLOPT_POSTFIELDS, post.?.ptr) != curl.CURLE_OK)
+            return error.CouldNotSetPost;
+    }
 
     // set write function callbacks
     if (curl.curl_easy_setopt(
@@ -67,4 +68,3 @@ fn writeToArrayListCallback(
     buffer.appendSlice(typed_data[0 .. nmemb * size]) catch return 0;
     return nmemb * size;
 }
-
