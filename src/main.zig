@@ -1,5 +1,7 @@
 const std = @import("std");
 const randmsgs = @import("randmsgs.zig");
+
+const users = @import("users.zig");
 const tractor = @import("tractor.zig");
 
 const MessageCounts = @import("mbox.zig").MessageCounts;
@@ -41,7 +43,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                 pixels[i] = ray.BLANK;
                 continue;
             }
-            
+
             var l_below = i + res_x - 1;
             var r_below = i + res_x + 1;
 
@@ -127,7 +129,7 @@ fn shuffle(rand: std.rand.Random, r: []u32) void {
     }
 }
 
-const gamma_glsl =
+const shader_glsl =
     \\#version 330
     \\
     \\// Input vertex attributes (from vertex shader)
@@ -136,24 +138,61 @@ const gamma_glsl =
     \\
     \\// Input uniform values
     \\uniform sampler2D texture0;
+    \\uniform sampler2D texture1;
     \\uniform vec4 colDiffuse;
     \\
     \\// Output fragment color
     \\out vec4 finalColor;
     \\
-    \\// NOTE: Add here your custom variables
-    \\
     \\void main()
     \\{
     \\    // Texel color fetching from texture sampler
-    \\    vec4 texelColor = texture(texture0, fragTexCoord)*colDiffuse*fragColor;
+    \\    vec4 texelColor = texture(texture0, fragTexCoord);
+    \\    
+    \\    // For reasons unclear we have to use a sampler2D instead of a isampler2D
+    \\    // to read the texture. Raylib stores this internally as a R8G8B8A8
+    \\    // and passes to OGL as 
+    \\    // *glInternalFormat = GL_RGBA8; *glFormat = GL_RGBA; *glType = GL_UNSIGNED_BYTE
+    \\    // so I'm not sure why we can't use an i/usampler2D to get the byte values directly.
+    \\    // for now we can get the floats and scale/round them.
+    \\    ivec4 usr = ivec4(round(texelFetch(texture1, ivec2(127,127), 0)*255));
+    \\    // this does not work per note above.
+    \\    // ivec4 usr = ivec4(texelFetch(texture1, ivec2(1,0), 0));
     \\
     \\    // Calculate final fragment color
-    \\    finalColor = pow(texelColor, vec4(0.4545));
+    \\    //finalColor = pow(texelColor, vec4(0.4545));
+    \\    finalColor.r = (usr.r == 3) ? 0.5 : 0.0;
+    \\    finalColor.g = 0.0;
+    \\    finalColor.b = 0.0;
+    \\    finalColor.a = 1.0;
     \\}
 ;
 
 pub fn main() anyerror!void {
+    //var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    //defer arena.deinit();
+    var arena = std.heap.GeneralPurposeAllocator(.{}){};
+    defer {
+        const leaked = arena.deinit();
+        if (leaked) std.debug.print("Leaked\n", .{});
+    }
+    var allocator = arena.allocator();
+    var user_map = try users.queryUsers(allocator, "http://127.0.0.1:3001/whoswho");
+    defer user_map.deinit();
+    std.debug.print("{}\n", .{user_map.users[user_map.users.len - 1]});
+    
+    var uid_iter = user_map.uid_map.keyIterator();
+    while (uid_iter.next()) |k| {
+        std.debug.print("{s}\n", .{user_map.getKey(k.*)});
+    }
+
+    //var umap = try allocator.alloc(ray.Color, 128*128);
+    //for (umap) |*p,i| {
+    //    p.* = .{.dept=5, .sub=10, .unit=15, .div=20};
+    //    if (i<6)
+    //        std.debug.print("{}\n", .{p});
+    //}
+
     var arena0 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena0.deinit();
     var arena1 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -206,16 +245,18 @@ pub fn main() anyerror!void {
     var prng = std.rand.DefaultPrng.init(42);
     const rand = prng.random();
 
-    //ray.SetTraceLogLevel(ray.LOG_INFO);
-    ray.SetConfigFlags(ray.FLAG_MSAA_4X_HINT);
+    ray.SetTraceLogLevel(ray.LOG_DEBUG);
+    //ray.SetConfigFlags(ray.FLAG_MSAA_4X_HINT);
     ray.InitWindow(res_x * window_scale, res_y * window_scale, "sandfarm");
     ray.SetWindowState(ray.FLAG_WINDOW_ALWAYS_RUN);
 
     ray.SetTargetFPS(fps);
 
     // Get shader to apply a gamma correction to the texture
-    var gamma_shader = ray.LoadShaderFromMemory(null, gamma_glsl);
-    defer ray.UnloadShader(gamma_shader);
+    var shader = ray.LoadShaderFromMemory(null, shader_glsl);
+    defer ray.UnloadShader(shader);
+    
+    var usr_tex_loc = ray.GetShaderLocation(shader, "texture1");
 
     // Build the texture buffer which we'll use as our canvas
     var img = ray.GenImageColor(res_x, res_y, ray.BLANK);
@@ -225,6 +266,15 @@ pub fn main() anyerror!void {
     defer ray.UnloadTexture(tex);
     ray.SetTextureFilter(tex, ray.TEXTURE_FILTER_POINT);
     ray.SetTextureWrap(tex, ray.TEXTURE_WRAP_CLAMP);
+
+    var usr_img = ray.GenImageColor(128, 128, ray.BLANK);
+    var usr_tex = ray.LoadTextureFromImage(usr_img);
+    defer ray.UnloadTexture(usr_tex);
+    ray.UnloadImage(usr_img);
+    ray.SetTextureFilter(usr_tex, ray.TEXTURE_FILTER_POINT);
+    ray.SetTextureWrap(usr_tex, ray.TEXTURE_WRAP_CLAMP);
+    ray.UpdateTexture(usr_tex, user_map.users.ptr);
+    std.debug.print("{}\n", .{usr_tex.format});
 
     // Set canvas to be blank by default
     var pixels = [_]ray.Color{ray.BLANK} ** (res_x * res_y);
@@ -238,6 +288,7 @@ pub fn main() anyerror!void {
     }
     var reservoir = [_]u32{0} ** (res_x / sections);
 
+    // Setup Message boxes
     var msgs = [_]MessageCounts{.{}} ** sections;
     var steps = [_]u32{fps} ** sections;
 
@@ -247,21 +298,41 @@ pub fn main() anyerror!void {
     var paused: bool = false;
 
     while (!ray.WindowShouldClose()) {
+
+        //////////////////////////////
+        // BEGIN DRAW
+        //
         ray.BeginDrawing();
-        ray.ClearBackground(ray.BLACK);
-        ray.BeginShaderMode(gamma_shader);
-        ray.DrawTextureTiled(
-            tex,
-            .{ .x = 0, .y = 0, .width = res_x, .height = res_y },
-            .{ .x = 0, .y = 0, .width = res_x * window_scale, .height = res_y * window_scale },
-            .{ .x = 0, .y = 0 },
-            0.0,
-            window_scale,
-            ray.WHITE,
-        );
-        ray.EndShaderMode();
-        ray.DrawFPS(10, 10);
+            ray.ClearBackground(ray.BLACK);
+            ray.BeginShaderMode(shader);
+                ray.SetShaderValueTexture(shader, usr_tex_loc, usr_tex);
+                ray.DrawTextureTiled(
+                    tex,
+                    .{ .x = 0, .y = 0, .width = res_x, .height = res_y },
+                    .{ .x = 0, .y = 0, .width = res_x * window_scale, .height = res_y * window_scale },
+                    .{ .x = 0, .y = 0 },
+                    0.0,
+                    window_scale,
+                    ray.WHITE,
+                );
+                ray.DrawTextureTiled(
+                    usr_tex,
+                    .{ .x = 0, .y = 0, .width = 128, .height = 128},
+                    .{ .x = 0, .y = 0, .width = 512, .height = 512},
+                    .{ .x = 0, .y = 0 },
+                    0.0,
+                    4.0,
+                    ray.WHITE,
+                );
+            ray.EndShaderMode();
+            
+            ray.DrawFPS(10, 10);
         ray.EndDrawing();
+        
+        //
+        // END DRAW
+        //////////////////////////////
+        
 
         for (ctxs) |*ctx, i| {
             var ctx_msgs = ctx.getMessages();
@@ -318,7 +389,7 @@ pub fn main() anyerror!void {
                     // though in practice that seems a rare occurance.
                     // * Another option is to move the step buffering into the threaded msg getters
                     // this would free the main thread up from having to figure out what to do.
-                    var overage: u32 = total - (res_x/sections);
+                    var overage: u32 = total - (res_x / sections);
                     while (overage > 0) {
                         overage -= 1;
                         switch (overage % 4) {
@@ -416,8 +487,8 @@ pub fn main() anyerror!void {
 
         // Debugging pause, still keeps running in background
         if (ray.IsKeyPressed(32)) paused = !paused;
-
     }
+    // Clean up threads here.
 }
 
 test "pixel_update" {
@@ -441,6 +512,6 @@ test "pixel_update" {
 }
 
 test "range reminder" {
-    var foo = [_]u32{0}**10;
+    var foo = [_]u32{0} ** 10;
     for (foo[0..10]) |_| {}
 }
