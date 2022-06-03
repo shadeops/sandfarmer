@@ -86,7 +86,7 @@ pub fn build(b: *std.build.Builder) void {
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
     exe_tests.addIncludeDir("ext/raylib/src");
-    exe_tests.addObjectFile("ext/raylib/src/libraylib.a");
+    exe_tests.addObjectFile("ext/raylib/build/raylib/libraylib.a");
     exe_tests.linkLibC();
 
     const test_step = b.step("test", "Run unit tests");
