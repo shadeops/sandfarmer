@@ -4,7 +4,7 @@ const randmsgs = @import("randmsgs.zig");
 const users = @import("users.zig");
 const tractor = @import("tractor.zig");
 
-const MessageCounts = @import("mbox.zig").MessageCounts;
+const mbox = @import("mbox.zig");
 
 const ray = @cImport(
     @cInclude("raylib.h"),
@@ -34,10 +34,11 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
             col = if (decreasing_row) (res_x - x) - 1 else x;
             i = row * res_x + col;
 
-            if (pixels[i].a == 0) continue;
+            if ((pixels[i].r & 0b1) == 0) continue;
+            if (pixels[i].r == 255 and pixels[i].g == 255 and pixels[i].b == 255 and pixels[i].a == 255) continue;
 
             var below = i + res_x;
-            if (pixels[below].a == 0) {
+            if ((pixels[below].r & 0b1) == 0) {
                 if (debug) std.debug.print("Moving {} below to {}\n", .{ i, below });
                 pixels[below] = pixels[i];
                 pixels[i] = ray.BLANK;
@@ -54,7 +55,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != 0 and pixels[l_below].a == 0) {
+                if (col != 0 and (pixels[l_below].r & 0b1) == 0) {
                     if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -65,7 +66,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != res_x - 1 and pixels[r_below].a == 0) {
+                if (col != res_x - 1 and (pixels[r_below].r & 0b1) == 0) {
                     if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -77,7 +78,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if ((col != res_x - 1) and pixels[r_below].a == 0) {
+                if ((col != res_x - 1) and (pixels[r_below].r & 0b1) == 0) {
                     if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -88,7 +89,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != 0 and pixels[l_below].a == 0) {
+                if (col != 0 and (pixels[l_below].r & 0b1) == 0) {
                     if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -132,80 +133,221 @@ fn shuffle(rand: std.rand.Random, r: []u32) void {
 const shader_glsl =
     \\#version 330
     \\
+    \\// For reasons unclear we have to use a sampler2D instead of a isampler2D
+    \\// to read the texture. Raylib stores this internally as a R8G8B8A8
+    \\// and passes to OGL as 
+    \\// *glInternalFormat = GL_RGBA8; *glFormat = GL_RGBA; *glType = GL_UNSIGNED_BYTE
+    \\// so I'm not sure why we can't use an [iu]sampler2D to get the byte values directly.
+    \\// for now we can get the floats and scale/round them.
+    \\// ivec4 usr = ivec4(texelFetch(texture1, ivec2(1,0), 0));
+    \\
     \\// Input vertex attributes (from vertex shader)
     \\in vec2 fragTexCoord;
     \\in vec4 fragColor;
     \\
     \\// Input uniform values
     \\uniform sampler2D texture0;
-    \\uniform sampler2D texture1;
+    \\
+    \\// texture pixel
+    \\//  r = (jid & (255<<8)) >> 8;
+    \\//  g = (jid & 255);
+    \\//  b = rand(0,256);
+    \\//  a = (uid & ((1<<14)-1)) | state & (3)
+    \\
+    \\uniform sampler2D user_texture;
+    \\uniform sampler2D rand_texture;
     \\uniform vec4 colDiffuse;
+    \\
+    \\uniform int mode;
     \\
     \\// Output fragment color
     \\out vec4 finalColor;
     \\
+    \\vec3 hsv2rgb(vec3 c)
+    \\{
+    \\    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    \\    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    \\    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    \\}
+    \\
+    \\
+    \\vec4 statusClr(int status, ivec2 scramble) {
+    \\    if (status > 2) return vec4(0.9, 0.16, 0.22, 1.0);
+    \\
+    \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
+    \\    float v = (rand.r*0.15) + 0.6;
+    \\    float s = (rand.g*0.45) + 0.35;
+    \\    float h = 0.0;
+    \\    if (status == 0) {
+    \\      h = 0.35;
+    \\    } else if (status == 1) {
+    \\      h = 0.60;
+    \\    } else if (status == 2) {
+    \\       h += 0.14;
+    \\    }
+    \\
+    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
+    \\    return vec4(clr, 1.0);
+    \\}
+    \\
+    \\vec4 jidClr(int jid) {
+    \\    int jid_x = jid % 128;
+    \\    int jid_y = jid / 128;
+    \\    vec4 clr = texelFetch(rand_texture, ivec2(jid_x, jid_y), 0);
+    \\    clr.a = 1.0;
+    \\    return clr;
+    \\}
+    \\vec4 ownerClr(int owner) {
+    \\    int owner_x = owner % 128;
+    \\    int owner_y = owner / 128;
+    \\    vec4 clr = texelFetch(rand_texture, ivec2(owner_x, owner_y), 0);
+    \\    clr.a = 1.0;
+    \\    return clr;
+    \\}
+    \\vec4 deptClr(int owner, ivec2 scramble) {
+    \\    ivec4 usr_limits = ivec4(round(texelFetch(user_texture, ivec2(127,127), 0)*255));
+    \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
+    \\    int owner_x = owner % 128;
+    \\    int owner_y = owner / 128;
+    \\    ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
+    \\    float h = float(usr.r) / float(usr_limits.r);
+    \\    float v = (rand.r*0.15) + 0.6;
+    \\    float s = (rand.g*0.45) + 0.35;
+    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
+    \\    return vec4(clr, 1.0);
+    \\}
+    \\vec4 divClr(int owner, ivec2 scramble) {
+    \\    ivec4 usr_limits = ivec4(round(texelFetch(user_texture, ivec2(127,127), 0)*255));
+    \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
+    \\    int owner_x = owner % 128;
+    \\    int owner_y = owner / 128;
+    \\    ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
+    \\    float h = float(usr.g) / float(usr_limits.g);
+    \\    float v = (rand.r*0.15) + 0.6;
+    \\    float s = (rand.g*0.45) + 0.35;
+    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
+    \\    return vec4(clr, 1.0);
+    \\}
+    \\vec4 subClr(int owner, ivec2 scramble) {
+    \\    ivec4 usr_limits = ivec4(round(texelFetch(user_texture, ivec2(127,127), 0)*255));
+    \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
+    \\    int owner_x = owner % 128;
+    \\    int owner_y = owner / 128;
+    \\    ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
+    \\    float h = float(usr.b) / float(usr_limits.b);
+    \\    float v = (rand.r*0.15) + 0.6;
+    \\    float s = (rand.g*0.45) + 0.35;
+    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
+    \\    return vec4(clr, 1.0);
+    \\}
+    \\vec4 unitClr(int owner, ivec2 scramble) {
+    \\    ivec4 usr_limits = ivec4(round(texelFetch(user_texture, ivec2(127,127), 0)*255));
+    \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
+    \\    int owner_x = owner % 128;
+    \\    int owner_y = owner / 128;
+    \\    ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
+    \\    float h = float(usr.a) / float(usr_limits.a);
+    \\    float v = (rand.r*0.15) + 0.6;
+    \\    float s = (rand.g*0.45) + 0.35;
+    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
+    \\    return vec4(clr, 1.0);
+    \\}
+    \\
     \\void main()
     \\{
-    \\    // Texel color fetching from texture sampler
     \\    vec4 texelColor = texture(texture0, fragTexCoord);
-    \\    
-    \\    // For reasons unclear we have to use a sampler2D instead of a isampler2D
-    \\    // to read the texture. Raylib stores this internally as a R8G8B8A8
-    \\    // and passes to OGL as 
-    \\    // *glInternalFormat = GL_RGBA8; *glFormat = GL_RGBA; *glType = GL_UNSIGNED_BYTE
-    \\    // so I'm not sure why we can't use an i/usampler2D to get the byte values directly.
-    \\    // for now we can get the floats and scale/round them.
-    \\    ivec4 usr = ivec4(round(texelFetch(texture1, ivec2(127,127), 0)*255));
-    \\    // this does not work per note above.
-    \\    // ivec4 usr = ivec4(texelFetch(texture1, ivec2(1,0), 0));
     \\
-    \\    // Calculate final fragment color
-    \\    //finalColor = pow(texelColor, vec4(0.4545));
-    \\    finalColor.r = (usr.r == 3) ? 0.5 : 0.0;
-    \\    finalColor.g = 0.0;
-    \\    finalColor.b = 0.0;
+    \\    ivec4 msg = ivec4(round(texelColor * 255));
+    \\
+    \\    int status = (int(msg.b) >> 6) & 255;
+    \\
+    \\    int active = int(msg.r) & 1;
+    \\
+    \\    // 0b0011_1111 = 63
+    \\    int owner = msg.a | ((msg.b & 63) << 8);
+    \\
+    \\    // 0b0011_1110 = 62
+    \\    int jid = msg.g | ((msg.r & 31) << 7);
+    \\
+    \\    ivec2 scramble = ivec2(msg.r ^ msg.g, msg.r ^ msg.b);
+    \\    
+    \\// modes:
+    \\//  status
+    \\//  jid
+    \\//  usr
+    \\//  dept
+    \\//  div
+    \\//  sub
+    \\//  unit
+    \\    if (mode==0) {
+    \\        finalColor = statusClr(status, scramble);
+    \\    } else if (mode == 1) {
+    \\        finalColor = jidClr(jid);
+    \\    } else if (mode == 2) {
+    \\        finalColor = ownerClr(owner);
+    \\    } else if (mode == 3) {
+    \\        finalColor = deptClr(owner, scramble);
+    \\    } else if (mode == 4) {
+    \\        finalColor = divClr(owner, scramble);
+    \\    } else if (mode == 5) {
+    \\        finalColor = subClr(owner, scramble);
+    \\    } else if (mode == 6) {
+    \\        finalColor = unitClr(owner, scramble);
+    \\    }
     \\    finalColor.a = 1.0;
+    \\    finalColor = pow(finalColor, vec4(0.4545)) * active;
+    \\    vec4 white = vec4(1.0);
+    \\    if (texelColor == white) {
+    \\      finalColor = vec4(0.7,0.7,0.7,1.0);
+    \\    }
     \\}
 ;
+
+fn encodeColor(rand: std.rand.Random, msg: mbox.Msg) ray.Color {
+    var clr = ray.BLANK;
+    _ = rand;
+    _ = msg;
+    clr.r = @intCast(u8, ((msg.jid >> 8) & 0b0001_1111) << 1);
+    clr.r |= (rand.intRangeAtMost(u8, 0, 3) << 6);
+    clr.r |= 0b1;
+
+    clr.g = @intCast(u8, msg.jid & 0b1111_1111);
+
+    clr.b = @intCast(u8, (msg.owner >> 8) & 0b0011_1111);
+    clr.b |= (@intCast(u8, @enumToInt(msg.msg)) << 6);
+
+    clr.a = @intCast(u8, msg.owner & 0b1111_1111);
+    return clr;
+}
+
+fn drawColor(pixels: []ray.Color, clr: ray.Color) void {
+    var x: i32 = ray.GetMouseX();
+    var y: i32 = ray.GetMouseY();
+    x = std.math.clamp(x, 0, res_x * window_scale);
+    y = std.math.clamp(y, 0, res_y * window_scale);
+    x = @divFloor(x, 3);
+    y = @divFloor(y, 3);
+    var offset = @minimum(@intCast(usize, res_x * @intCast(u32, y) + @intCast(u32, x)), res_x * res_y - 1);
+    pixels[offset] = clr;
+}
 
 pub fn main() anyerror!void {
     //var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     //defer arena.deinit();
-    var arena = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
-        const leaked = arena.deinit();
+        const leaked = gpa.deinit();
         if (leaked) std.debug.print("Leaked\n", .{});
     }
-    var allocator = arena.allocator();
+    var allocator = gpa.allocator();
     var user_map = try users.queryUsers(allocator, "http://127.0.0.1:3001/whoswho");
     defer user_map.deinit();
     std.debug.print("{}\n", .{user_map.users[user_map.users.len - 1]});
-    
+
     var uid_iter = user_map.uid_map.keyIterator();
     while (uid_iter.next()) |k| {
         std.debug.print("{s}\n", .{user_map.getKey(k.*)});
     }
-
-    //var umap = try allocator.alloc(ray.Color, 128*128);
-    //for (umap) |*p,i| {
-    //    p.* = .{.dept=5, .sub=10, .unit=15, .div=20};
-    //    if (i<6)
-    //        std.debug.print("{}\n", .{p});
-    //}
-
-    var arena0 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena0.deinit();
-    var arena1 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena1.deinit();
-    var arena2 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena2.deinit();
-    var arena3 = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena3.deinit();
-
-    var allocator0 = arena0.allocator();
-    var allocator1 = arena1.allocator();
-    var allocator2 = arena2.allocator();
-    var allocator3 = arena3.allocator();
 
     // Start data gathering
     //var ctxs = [_]randmsgs.Context{.{}} ** sections;
@@ -218,28 +360,27 @@ pub fn main() anyerror!void {
     //ctxs[2].size = 20;
     //ctxs[3].size = 50;
 
+    const urls = [_][]const u8{
+        "http://127.0.0.1:3000/Tractor/monitor",
+        "http://127.0.0.1:3001/Tractor/monitor",
+        "http://127.0.0.1:3002/Tractor/monitor",
+        "http://127.0.0.1:3003/Tractor/monitor",
+    };
+
     var ctxs = [_]tractor.Context{undefined} ** sections;
-    ctxs[0] = tractor.Context{
-        .allocator = allocator0,
-        .url = "http://127.0.0.1:3000/Tractor/monitor",
-    };
-    ctxs[1] = tractor.Context{
-        .allocator = allocator1,
-        .url = "http://127.0.0.1:3001/Tractor/monitor",
-    };
-    ctxs[2] = tractor.Context{
-        .allocator = allocator2,
-        .url = "http://127.0.0.1:3002/Tractor/monitor",
-    };
-    ctxs[3] = tractor.Context{
-        .allocator = allocator3,
-        .url = "http://127.0.0.1:3003/Tractor/monitor",
-    };
-    for (ctxs) |*ctx| {
+    for (ctxs) |*ctx, i| {
+        ctx.* = .{
+            .allocator = std.heap.page_allocator,
+            .url = urls[i],
+            .usermap = &user_map,
+            .mbuffer = .{
+                .msgs = try std.heap.page_allocator.alloc(mbox.Msg, (fps * res_x) / sections),
+            },
+        };
         _ = try ctx.startThread();
     }
 
-    //"http://tractor/Tractor/monitor"
+    // TODO fix mbuffer leak
 
     // Seed the random number generator
     var prng = std.rand.DefaultPrng.init(42);
@@ -255,8 +396,12 @@ pub fn main() anyerror!void {
     // Get shader to apply a gamma correction to the texture
     var shader = ray.LoadShaderFromMemory(null, shader_glsl);
     defer ray.UnloadShader(shader);
-    
-    var usr_tex_loc = ray.GetShaderLocation(shader, "texture1");
+
+    var usr_tex_loc = ray.GetShaderLocation(shader, "user_texture");
+    var rnd_tex_loc = ray.GetShaderLocation(shader, "rand_texture");
+    var mode_uni_loc = ray.GetShaderLocation(shader, "mode");
+
+    var tex_pixels: []ray.Color = undefined;
 
     // Build the texture buffer which we'll use as our canvas
     var img = ray.GenImageColor(res_x, res_y, ray.BLANK);
@@ -274,7 +419,26 @@ pub fn main() anyerror!void {
     ray.SetTextureFilter(usr_tex, ray.TEXTURE_FILTER_POINT);
     ray.SetTextureWrap(usr_tex, ray.TEXTURE_WRAP_CLAMP);
     ray.UpdateTexture(usr_tex, user_map.users.ptr);
-    std.debug.print("{}\n", .{usr_tex.format});
+
+    var rnd_img = ray.GenImageColor(256, 256, ray.BLANK);
+    var rnd_tex = ray.LoadTextureFromImage(rnd_img);
+    defer ray.UnloadTexture(rnd_tex);
+    ray.UnloadImage(rnd_img);
+    ray.SetTextureFilter(rnd_tex, ray.TEXTURE_FILTER_POINT);
+    ray.SetTextureWrap(rnd_tex, ray.TEXTURE_WRAP_CLAMP);
+    tex_pixels = try allocator.alloc(ray.Color, 256 * 256);
+    for (tex_pixels) |*pixel| {
+        // TODO instead of just random we could make these stratified to get the
+        // maximum spacing between colors
+        pixel.* = .{
+            .r = rand.intRangeAtMost(u8, 0, 255),
+            .g = rand.intRangeAtMost(u8, 0, 255),
+            .b = rand.intRangeAtMost(u8, 0, 255),
+            .a = rand.intRangeAtMost(u8, 0, 255),
+        };
+    }
+    ray.UpdateTexture(rnd_tex, tex_pixels.ptr);
+    allocator.free(tex_pixels);
 
     // Set canvas to be blank by default
     var pixels = [_]ray.Color{ray.BLANK} ** (res_x * res_y);
@@ -286,10 +450,18 @@ pub fn main() anyerror!void {
     for (pool) |_, i| {
         pool[i] = @intCast(u32, i);
     }
-    var reservoir = [_]u32{0} ** (res_x / sections);
-
     // Setup Message boxes
-    var msgs = [_]MessageCounts{.{}} ** sections;
+    var msgs = [_]mbox.MessageCounts{.{}} ** sections;
+    var msg_boxes = [_]mbox.MsgBuffer{.{ .msgs = undefined }} ** sections;
+    for (msg_boxes) |*msg_box| {
+        msg_box.msgs = try allocator.alloc(mbox.Msg, (fps * res_x) / sections);
+    }
+    defer {
+        for (msg_boxes) |*msg_box| {
+            allocator.free(msg_box.msgs);
+        }
+    }
+
     var steps = [_]u32{fps} ** sections;
 
     // State of
@@ -297,152 +469,78 @@ pub fn main() anyerror!void {
     var sides: bool = true;
     var paused: bool = false;
 
+    var mode: i32 = 0;
+
     while (!ray.WindowShouldClose()) {
 
         //////////////////////////////
         // BEGIN DRAW
         //
         ray.BeginDrawing();
-            ray.ClearBackground(ray.BLACK);
-            ray.BeginShaderMode(shader);
-                ray.SetShaderValueTexture(shader, usr_tex_loc, usr_tex);
-                ray.DrawTextureTiled(
-                    tex,
-                    .{ .x = 0, .y = 0, .width = res_x, .height = res_y },
-                    .{ .x = 0, .y = 0, .width = res_x * window_scale, .height = res_y * window_scale },
-                    .{ .x = 0, .y = 0 },
-                    0.0,
-                    window_scale,
-                    ray.WHITE,
-                );
-                ray.DrawTextureTiled(
-                    usr_tex,
-                    .{ .x = 0, .y = 0, .width = 128, .height = 128},
-                    .{ .x = 0, .y = 0, .width = 512, .height = 512},
-                    .{ .x = 0, .y = 0 },
-                    0.0,
-                    4.0,
-                    ray.WHITE,
-                );
-            ray.EndShaderMode();
-            
-            ray.DrawFPS(10, 10);
+        ray.ClearBackground(ray.BLACK);
+        ray.BeginShaderMode(shader);
+        ray.SetShaderValueTexture(shader, usr_tex_loc, usr_tex);
+        ray.SetShaderValueTexture(shader, rnd_tex_loc, rnd_tex);
+        ray.SetShaderValue(shader, mode_uni_loc, &mode, ray.SHADER_UNIFORM_INT);
+        ray.DrawTextureTiled(
+            tex,
+            .{ .x = 0, .y = 0, .width = res_x, .height = res_y },
+            .{ .x = 0, .y = 0, .width = res_x * window_scale, .height = res_y * window_scale },
+            .{ .x = 0, .y = 0 },
+            0.0,
+            window_scale,
+            ray.WHITE,
+        );
+        ray.EndShaderMode();
+
+        ray.DrawFPS(10, 10);
         ray.EndDrawing();
-        
+
         //
         // END DRAW
         //////////////////////////////
-        
 
         for (ctxs) |*ctx, i| {
-            var ctx_msgs = ctx.getMessages();
+            var ctx_msgs = ctx.getMessages(&msg_boxes[i]);
             if (ctx_msgs) |msg| {
                 msgs[i].add(msg);
                 steps[i] = fps;
             }
 
-            if (msgs[i].hasMsgs() and steps[i] > 0) {
-                defer steps[i] -= 1;
+            if (msg_boxes[i].size == 0 or steps[i] == 0) {
+                continue;
+            }
 
-                var step_msgs = MessageCounts{};
+            defer steps[i] -= 1;
 
-                var msg_pct: f32 = undefined;
-                if (msgs[i].active > 0) {
-                    msg_pct = @intToFloat(f32, msgs[i].active) / @intToFloat(f32, steps[i]);
-                    step_msgs.active = @floatToInt(u32, msg_pct);
-                    if (@mod(msg_pct, 1.0) > rand.float(f32))
-                        step_msgs.active += 1;
-                }
+            var msg_pct = @intToFloat(f32, msg_boxes[i].size) / @intToFloat(f32, steps[i]);
+            var spawn_count = @floatToInt(u32, msg_pct);
+            if (@mod(msg_pct, 1.0) > rand.float(f32))
+                spawn_count += 1;
 
-                if (msgs[i].blocked > 0) {
-                    msg_pct = @intToFloat(f32, msgs[i].blocked) / @intToFloat(f32, steps[i]);
-                    step_msgs.blocked = @floatToInt(u32, msg_pct);
-                    if (@mod(msg_pct, 1.0) > rand.float(f32))
-                        step_msgs.blocked += 1;
-                }
+            if (spawn_count == 0) continue;
 
-                if (msgs[i].err > 0) {
-                    msg_pct = @intToFloat(f32, msgs[i].err) / @intToFloat(f32, steps[i]);
-                    step_msgs.err = @floatToInt(u32, msg_pct);
-                    if (@mod(msg_pct, 1.0) > rand.float(f32))
-                        step_msgs.err += 1;
-                }
+            // every iteration shuffle the indicies
+            shuffle(rand, pool[0..]);
 
-                if (msgs[i].done > 0) {
-                    msg_pct = @intToFloat(f32, msgs[i].done) / @intToFloat(f32, steps[i]);
-                    step_msgs.done = @floatToInt(u32, msg_pct);
-                    if (@mod(msg_pct, 1.0) > rand.float(f32))
-                        step_msgs.done += 1;
-                }
+            if (spawn_count > res_x / sections) {
+                std.debug.print("Warning: total pixels, {}, more than buffer.\n", .{spawn_count});
+                spawn_count = @minimum(spawn_count, res_x / sections - 1);
+            }
 
-                var total = (step_msgs.active + step_msgs.err + step_msgs.done + step_msgs.blocked);
-                if (total > res_x / sections) {
-                    std.debug.print("Warning: total pixels, {}, more than buffer.\n", .{total});
-                    // Here we will cull any points that didn't fit in the current step.
-                    // The total msgs[i] will still contain the non-culled points since the
-                    // resultanting step_msg is subtracted msgs[i], see * reference_note_1
+            var pixel_offset = (i * res_x / sections);
 
-                    // NOTES:
-                    // * A better approach is to remove by a weighted average so higher values
-                    // are removed more frequently
-                    // * An even better approach is to not cause an overage in the first place
-                    // though in practice that seems a rare occurance.
-                    // * Another option is to move the step buffering into the threaded msg getters
-                    // this would free the main thread up from having to figure out what to do.
-                    var overage: u32 = total - (res_x / sections);
-                    while (overage > 0) {
-                        overage -= 1;
-                        switch (overage % 4) {
-                            0 => step_msgs.active -= 1,
-                            1 => step_msgs.done -= 1,
-                            2 => step_msgs.err -= 1,
-                            3 => step_msgs.blocked -= 1,
-                            else => unreachable,
-                        }
-                    }
-                    total = @minimum(total, res_x / sections - 1);
-                }
-
-                if (total > 0) {
-                    reservoirSample(rand, pool[0..], reservoir[0..total]);
-                    shuffle(rand, reservoir[0..total]);
-
-                    var pixel_offset = (i * res_x / sections);
-
-                    var start: u32 = 0;
-                    for (reservoir[start .. step_msgs.err + start]) |x| {
-                        pixels[x + pixel_offset] = ray.RED;
-                    }
-                    start += step_msgs.err;
-                    for (reservoir[start .. step_msgs.active + start]) |x| {
-                        //pixels[x] = ray.LIME;
-                        pixels[x + pixel_offset] = ray.ColorFromHSV(
-                            125.0,
-                            rand.float(f32) * 0.15 + 0.6,
-                            rand.float(f32) * 0.45 + 0.35,
-                        );
-                    }
-                    start += step_msgs.active;
-                    for (reservoir[start .. step_msgs.done + start]) |x| {
-                        //pixels[x] = ray.SKYBLUE;
-                        pixels[x + pixel_offset] = ray.ColorFromHSV(
-                            215.0,
-                            rand.float(f32) * 0.15 + 0.6,
-                            rand.float(f32) * 0.45 + 0.35,
-                        );
-                    }
-                    start += step_msgs.done;
-                    for (reservoir[start .. step_msgs.blocked + start]) |x| {
-                        //pixels[x] = ray.ORANGE;
-                        pixels[x + pixel_offset] = ray.ColorFromHSV(
-                            50.0,
-                            rand.float(f32) * 0.15 + 0.6,
-                            rand.float(f32) * 0.45 + 0.35,
-                        );
-                    }
-                    // * reference_note_1
-                    msgs[i].sub(step_msgs);
-                }
+            var j: usize = 0;
+            while (j < spawn_count) : (j += 1) {
+                var msg = msg_boxes[i].next() orelse break;
+                var x = pool[j];
+                pixels[x + pixel_offset] = encodeColor(rand, msg);
+                //switch (msg.msg) {
+                //    .active => pixels[x + pixel_offset] = ray.LIME,
+                //    .done => pixels[x + pixel_offset] = ray.SKYBLUE,
+                //    .err => pixels[x + pixel_offset] = ray.RED,
+                //    .blocked => pixels[x + pixel_offset] = ray.ORANGE,
+                //}
             }
         }
 
@@ -478,21 +576,27 @@ pub fn main() anyerror!void {
             }
         }
 
-        //if ( ray.IsMouseButtonPressed(0) ) {
-        //    var x = @divFloor(ray.GetMouseX(), 2);
-        //    var y = @divFloor(ray.GetMouseY(), 2);
-        //    var offset = @intCast(usize, res_x*y + x);
-        //    pixels[offset] = ray.RED;
-        //}
+        if (ray.IsMouseButtonDown(0)) {
+            drawColor(pixels[0..], ray.WHITE);
+        } else if (ray.IsMouseButtonDown(1)) {
+            drawColor(pixels[0..], ray.BLANK);
+        }
 
         // Debugging pause, still keeps running in background
         if (ray.IsKeyPressed(32)) paused = !paused;
+        if (ray.IsKeyPressed(262)) mode = @mod(mode + 1, 7);
+        if (ray.IsKeyPressed(263)) {
+            mode -= 1;
+            if (mode < 0) mode = 7 + mode;
+        }
+        //std.debug.print("{}\n", .{ray.GetKeyPressed()});
+        //std.debug.print("{}\n", .{mode});
     }
     // Clean up threads here.
 }
 
 test "pixel_update" {
-    std.debug.print("\n", .{});
+    //std.debug.print("\n", .{});
     var prng = std.rand.DefaultPrng.init(42);
     const rand = prng.random();
     var pixels = [_]ray.Color{ray.BLANK} ** (res_x * res_y);
@@ -504,7 +608,7 @@ test "pixel_update" {
     try std.testing.expect(pixels[res_x * (res_y - 3) + 5].a == 255);
     try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);
     try std.testing.expect(pixels[res_x * (res_y - 1) + 5].a == 255);
-    std.debug.print("Second update\n", .{});
+    //std.debug.print("Second update\n", .{});
     _ = update(rand, true, pixels[0..]);
     try std.testing.expect(pixels[res_x * (res_y - 1) + 6].a == 255);
     try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);

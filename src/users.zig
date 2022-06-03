@@ -18,16 +18,15 @@ const SliceRange = struct {
 /// These allow us to store all our strings in one continous block of memory
 /// which a hash_map then indexes into using a two context adapters to translate
 /// between our offsets within ArrayList and the string slices. This is a similar
-/// workflow to 
+/// workflow to
 /// https://zig.news/andrewrk/how-to-use-hash-map-contexts-to-save-memory-when-doing-a-string-table-3l33
 /// and std.hash_map.StringIndexContext / std.hash_map.StringIndexAdapter but doesn't rely on
 /// null terminated strings.
 ///
 /// The main reason for needing this is using an ArrayList directly, the pointers are invalidated
 /// whenever the array resizes.
-
 const SliceIndexContext = struct {
-    bytes: *std.ArrayListUnmanaged(u8),
+    bytes: *const std.ArrayListUnmanaged(u8),
 
     pub fn eql(self: @This(), a: SliceRange, b: SliceRange) bool {
         _ = self;
@@ -42,7 +41,7 @@ const SliceIndexContext = struct {
 };
 
 const SliceIndexAdapter = struct {
-    bytes: *std.ArrayListUnmanaged(u8),
+    bytes: *const std.ArrayListUnmanaged(u8),
 
     pub fn eql(self: @This(), a_slice: []const u8, b: SliceRange) bool {
         std.debug.assert(self.bytes.items.len >= b.start + b.len);
@@ -55,7 +54,6 @@ const SliceIndexAdapter = struct {
         return std.hash_map.hashString(adapted_key);
     }
 };
-
 
 pub const UserMap = struct {
     const Self = @This();
@@ -111,8 +109,8 @@ pub const UserMap = struct {
     }
 
     pub fn getKey(self: Self, srange: SliceRange) []const u8 {
-        std.debug.assert(self.logins.items.len >= (srange.start+srange.len));
-        return self.logins.items[srange.start..(srange.start+srange.len)];
+        std.debug.assert(self.logins.items.len >= (srange.start + srange.len));
+        return self.logins.items[srange.start..(srange.start + srange.len)];
     }
 };
 
@@ -202,7 +200,12 @@ pub fn queryUsers(allocator: std.mem.Allocator, url: []const u8) !UserMap {
 test "hash contexts" {
     const Mapper = struct {
         names: std.ArrayListUnmanaged(u8),
-        map: std.HashMapUnmanaged(SliceRange, u16, SliceIndexContext, std.hash_map.default_max_load_percentage),
+        map: std.HashMapUnmanaged(
+            SliceRange,
+            u16,
+            SliceIndexContext,
+            std.hash_map.default_max_load_percentage,
+        ),
         fn init() @This() {
             return .{ .map = .{}, .names = .{} };
         }
