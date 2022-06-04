@@ -9,7 +9,7 @@ const mbox = @import("mbox.zig");
 const ray = @cImport(
     @cInclude("raylib.h"),
 );
-    
+
 const world_png = @embedFile("../resources/map.png");
 const shader_glsl = @embedFile("../resources/shader.glsl");
 
@@ -153,15 +153,26 @@ fn encodeColor(rand: std.rand.Random, msg: mbox.Msg) ray.Color {
     return clr;
 }
 
+fn drawPixel(pixels: []ray.Color, clr: ray.Color, x: i32, y: i32) void {
+    if (x < 0 or y < 0 or x >= res_x or y >= res_y) return;
+    var offset = @minimum(
+        @intCast(usize, res_x * @intCast(u32, y) + @intCast(u32, x)),
+        res_x * res_y - 1,
+    );
+    pixels[offset] = clr;
+}
+
 fn drawColor(pixels: []ray.Color, clr: ray.Color) void {
     var x: i32 = ray.GetMouseX();
     var y: i32 = ray.GetMouseY();
-    x = std.math.clamp(x, 0, res_x * window_scale);
-    y = std.math.clamp(y, 0, res_y * window_scale);
-    x = @divFloor(x, 3);
-    y = @divFloor(y, 3);
-    var offset = @minimum(@intCast(usize, res_x * @intCast(u32, y) + @intCast(u32, x)), res_x * res_y - 1);
-    pixels[offset] = clr;
+    if (x < 0 or y < 0 or x >= (res_x * window_scale) or y >= (res_y * window_scale)) return;
+    x = @divFloor(x, window_scale);
+    y = @divFloor(y, window_scale);
+    drawPixel(pixels, clr, x, y);
+    drawPixel(pixels, clr, x + 1, y);
+    drawPixel(pixels, clr, x - 1, y);
+    drawPixel(pixels, clr, x, y + 1);
+    drawPixel(pixels, clr, x, y - 1);
 }
 
 pub fn main() anyerror!void {
