@@ -38,7 +38,12 @@ pub const Context = struct {
         defer mqueue.deinit();
         // TODO if the mqueue gets huge, sleep (or ignore msgs for a bit)
         while (true) {
-            var new_msgs = (try self.queryTractor(&mqueue)) orelse continue;
+            defer std.time.sleep(1 * std.time.ns_per_s);
+
+            var new_msgs = (self.queryTractor(&mqueue) catch |err| switch (err) {
+                error.FailedToPerformRequest => continue,
+                else => return err,
+            }) orelse continue;
 
             /////////////////////////
             // start barrier
@@ -61,8 +66,6 @@ pub const Context = struct {
                 }
                 mqueue.shrinkRetainingCapacity(new_len);
             }
-
-            std.time.sleep(1 * std.time.ns_per_s);
         }
     }
 
@@ -126,9 +129,12 @@ pub const Context = struct {
                 } else {
                     continue;
                 }
+                // if uid doesn't exist then it something like root or other meta-user.
+                // in this case we store the user as second to last (as the last is the sums).
+                var uid: u16 = self.usermap.getUid(item.Array.items[12].String) orelse (128 * 128 - 2);
                 try queue.append(.{
                     .jid = @intCast(u32, item.Array.items[1].Integer),
-                    .owner = self.usermap.getUid(item.Array.items[12].String).?,
+                    .owner = uid,
                     .msg = mtype,
                 });
             }
