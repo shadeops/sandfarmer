@@ -13,17 +13,29 @@ const ray = @cImport(
 const world_png = @embedFile("../resources/map.png");
 const shader_glsl = @embedFile("../resources/shader.glsl");
 
+const urls = [_][]const u8{
+    "http://127.0.0.1:3000/Tractor/monitor",
+    "http://127.0.0.1:3001/Tractor/monitor",
+    "http://127.0.0.1:3002/Tractor/monitor",
+    "http://127.0.0.1:3003/Tractor/monitor",
+};
+
+const user_url = "http://127.0.0.1:3001/whoswho";
+
 const fps: i32 = 60;
 const res_x: u32 = 320;
 const res_y: u32 = 240;
 const window_scale: u32 = 3;
+const win_x: u32 = res_x * window_scale;
+const win_y: u32 = res_y * window_scale;
 const sections: u32 = 4;
+const fade_duration: u8 = 120;
+const drain_steps: u32 = 360;
 
 const debug = false;
 
 fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) bool {
     var ret = false;
-    _ = sides;
     var row: u32 = res_y - 1;
     while (row > 0) {
         row -= 1;
@@ -165,7 +177,7 @@ fn drawPixel(pixels: []ray.Color, clr: ray.Color, x: i32, y: i32) void {
 fn drawColor(pixels: []ray.Color, clr: ray.Color) void {
     var x: i32 = ray.GetMouseX();
     var y: i32 = ray.GetMouseY();
-    if (x < 0 or y < 0 or x >= (res_x * window_scale) or y >= (res_y * window_scale)) return;
+    if (x < 0 or y < 0 or x >= win_x or y >= win_y) return;
     x = @divFloor(x, window_scale);
     y = @divFloor(y, window_scale);
     drawPixel(pixels, clr, x, y);
@@ -184,7 +196,7 @@ pub fn main() anyerror!void {
         if (leaked) std.debug.print("Leaked\n", .{});
     }
     var allocator = gpa.allocator();
-    var user_map = try users.queryUsers(allocator, "http://127.0.0.1:3001/whoswho");
+    var user_map = try users.queryUsers(allocator, user_url);
     defer user_map.deinit();
     std.debug.print("{}\n", .{user_map.users[user_map.users.len - 1]});
 
@@ -204,13 +216,6 @@ pub fn main() anyerror!void {
     //ctxs[2].size = 20;
     //ctxs[3].size = 50;
 
-    const urls = [_][]const u8{
-        "http://127.0.0.1:3000/Tractor/monitor",
-        "http://127.0.0.1:3001/Tractor/monitor",
-        "http://127.0.0.1:3002/Tractor/monitor",
-        "http://127.0.0.1:3003/Tractor/monitor",
-    };
-
     var ctxs = [_]tractor.Context{undefined} ** sections;
     for (ctxs) |*ctx, i| {
         ctx.* = .{
@@ -221,7 +226,8 @@ pub fn main() anyerror!void {
                 .msgs = try std.heap.page_allocator.alloc(mbox.Msg, (fps * res_x) / sections),
             },
         };
-        _ = try ctx.startThread();
+        var thread = try ctx.startThread();
+        thread.detach();
     }
 
     // TODO fix mbuffer leak
@@ -238,7 +244,7 @@ pub fn main() anyerror!void {
 
     ray.SetTraceLogLevel(ray.LOG_DEBUG);
     //ray.SetConfigFlags(ray.FLAG_MSAA_4X_HINT);
-    ray.InitWindow(res_x * window_scale, res_y * window_scale, "sandfarm");
+    ray.InitWindow(win_x, win_y, "sandfarm");
     ray.SetWindowState(ray.FLAG_WINDOW_ALWAYS_RUN);
 
     ray.SetTargetFPS(fps);
@@ -321,9 +327,12 @@ pub fn main() anyerror!void {
     var steps = [_]u32{fps} ** sections;
 
     // State of
-    var clear_steps: usize = 0;
+    var drain_step: u32 = 0;
     var sides: bool = true;
     var paused: bool = false;
+    var fade_out: u8 = 0;
+    var erase = false;
+    var draining = false;
 
     var mode: i32 = 0;
 
@@ -337,14 +346,11 @@ pub fn main() anyerror!void {
         "Division",
         "User's Jobs",
     };
-    var fade_out: u8 = 0;
-    const fade_duration: u8 = 120;
-    var erase = false;
 
     while (!ray.WindowShouldClose()) {
 
         //////////////////////////////
-        // BEGIN DRAW
+        // BEGIN DRAW {
         //
         ray.BeginDrawing();
         ray.ClearBackground(ray.BLACK);
@@ -357,7 +363,7 @@ pub fn main() anyerror!void {
         ray.DrawTextureTiled(
             tex,
             .{ .x = 0, .y = 0, .width = res_x, .height = res_y },
-            .{ .x = 0, .y = 0, .width = res_x * window_scale, .height = res_y * window_scale },
+            .{ .x = 0, .y = 0, .width = win_x, .height = win_y },
             .{ .x = 0, .y = 0 },
             0.0,
             window_scale,
@@ -382,7 +388,7 @@ pub fn main() anyerror!void {
         ray.EndDrawing();
 
         //
-        // END DRAW
+        // END DRAW }
         //////////////////////////////
 
         for (ctxs) |*ctx, i| {
@@ -429,20 +435,25 @@ pub fn main() anyerror!void {
             }
         }
 
-        var clear = update(rand, sides, pixels[0..], erase);
+        var needs_draining = update(rand, sides, pixels[0..], erase);
         erase = false;
+        sides = true;
+        if (needs_draining) {
+            drain_step = drain_steps;
+        }
+
         if (!paused) {
             ray.UpdateTexture(tex, &pixels);
         }
 
-        if (clear) {
-            clear_steps = 360;
-            sides = false;
+        if (drain_step > 0) {
+            drain_step -= 1;
+            draining = true;
         }
 
-        if (clear_steps > 0) {
-            clear_steps -= 1;
-            if (clear_steps == 0) sides = true;
+        if (draining) {
+            draining = false;
+            sides = false;
 
             // Binned holes
             // var pix: u32 = 1;
@@ -457,11 +468,21 @@ pub fn main() anyerror!void {
             while (pix < res_x) : (pix += 1) {
                 var offset_start = (res_x * res_y - 1);
                 if (rand.float(f32) > 0.5) {
-                    pixels[offset_start - pix] = ray.BLANK;
+                    var pixel_offset = offset_start - pix;
+                    if (pixels[pixel_offset].r != 255 and
+                        pixels[pixel_offset].g != 255 and
+                        pixels[pixel_offset].b != 255 and
+                        pixels[pixel_offset].a != 255)
+                        pixels[offset_start - pix] = ray.BLANK;
                 }
             }
         }
 
+        //////////////////////////////
+        // BEGIN INTERACTIONS {
+        //
+
+        // Draw / erase pixels
         if (ray.IsMouseButtonDown(0)) {
             drawColor(pixels[0..], ray.WHITE);
         } else if (ray.IsMouseButtonDown(1)) {
@@ -470,6 +491,8 @@ pub fn main() anyerror!void {
 
         // Debugging pause, still keeps running in background
         if (ray.IsKeyPressed(32)) paused = !paused;
+
+        // Switch shader mode
         if (ray.IsKeyPressed(262)) {
             mode = @mod(mode + 1, 8);
             fade_out = fade_duration;
@@ -479,11 +502,20 @@ pub fn main() anyerror!void {
             if (mode < 0) mode = 8 + mode;
             fade_out = fade_duration;
         }
+
+        // Erase any blockers
         if (ray.IsKeyPressed(67)) {
             erase = true;
         }
+
+        if (ray.IsKeyDown(68)) {
+            draining = true;
+        }
+        //
+        // END INTERACTIONS }
+        //////////////////////////////
+
         //std.debug.print("{}\n", .{ray.GetKeyPressed()});
-        //std.debug.print("{}\n", .{mode});
     }
     // Clean up threads here.
 }
