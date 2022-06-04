@@ -18,7 +18,7 @@ const sections: u32 = 4;
 
 const debug = false;
 
-fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
+fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) bool {
     var ret = false;
     _ = sides;
     var row: u32 = res_y - 1;
@@ -35,7 +35,10 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color) bool {
             i = row * res_x + col;
 
             if ((pixels[i].r & 0b1) == 0) continue;
-            if (pixels[i].r == 255 and pixels[i].g == 255 and pixels[i].b == 255 and pixels[i].a == 255) continue;
+            if (pixels[i].r == 255 and pixels[i].g == 255 and pixels[i].b == 255 and pixels[i].a == 255) {
+                if (erase) pixels[i] = ray.BLANK;
+                continue;
+            }
 
             var below = i + res_x;
             if ((pixels[below].r & 0b1) == 0) {
@@ -255,9 +258,9 @@ const shader_glsl =
     \\//  jid
     \\//  usr
     \\//  dept
-    \\//  div
     \\//  sub
     \\//  unit
+    \\//  div
     \\    if (mode==0) {
     \\        finalColor = statusClr(status, scramble);
     \\    } else if (mode == 1) {
@@ -453,6 +456,20 @@ pub fn main() anyerror!void {
 
     var mode: i32 = 0;
 
+    const modes = [_][]const u8{
+        "Status",
+        "JID",
+        "Owner",
+        "Department",
+        "Sub-Department",
+        "Unit",
+        "Division",
+        "User's Jobs",
+    };
+    var fade_out: u8 = 0;
+    const fade_duration: u8 = 120;
+    var erase = false;
+
     while (!ray.WindowShouldClose()) {
 
         //////////////////////////////
@@ -476,7 +493,20 @@ pub fn main() anyerror!void {
         );
         ray.EndShaderMode();
 
-        ray.DrawFPS(10, 10);
+        if (fade_out > 0) {
+            ray.DrawText(
+                modes[@intCast(usize, mode)].ptr,
+                10,
+                20,
+                36,
+                ray.Fade(
+                    .{ .r = 192, .g = 192, .b = 192, .a = 255 },
+                    @intToFloat(f32, fade_out) / @intToFloat(f32, fade_duration),
+                ),
+            );
+            fade_out -= 1;
+        }
+        //ray.DrawFPS(10, 10);
         ray.EndDrawing();
 
         //
@@ -527,7 +557,8 @@ pub fn main() anyerror!void {
             }
         }
 
-        var clear = update(rand, sides, pixels[0..]);
+        var clear = update(rand, sides, pixels[0..], erase);
+        erase = false;
         if (!paused) {
             ray.UpdateTexture(tex, &pixels);
         }
@@ -567,10 +598,17 @@ pub fn main() anyerror!void {
 
         // Debugging pause, still keeps running in background
         if (ray.IsKeyPressed(32)) paused = !paused;
-        if (ray.IsKeyPressed(262)) mode = @mod(mode + 1, 8);
+        if (ray.IsKeyPressed(262)) {
+            mode = @mod(mode + 1, 8);
+            fade_out = fade_duration;
+        }
         if (ray.IsKeyPressed(263)) {
             mode -= 1;
             if (mode < 0) mode = 8 + mode;
+            fade_out = fade_duration;
+        }
+        if (ray.IsKeyPressed(67)) {
+            erase = true;
         }
         //std.debug.print("{}\n", .{ray.GetKeyPressed()});
         //std.debug.print("{}\n", .{mode});
