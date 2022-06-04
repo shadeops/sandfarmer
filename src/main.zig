@@ -159,6 +159,7 @@ const shader_glsl =
     \\uniform vec4 colDiffuse;
     \\
     \\uniform int mode;
+    \\uniform int current_user;
     \\
     \\// Output fragment color
     \\out vec4 finalColor;
@@ -186,7 +187,7 @@ const shader_glsl =
     \\       h += 0.14;
     \\    }
     \\
-    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
+    \\    vec3 clr = hsv2rgb(vec3(h, s, v));
     \\    return vec4(clr, 1.0);
     \\}
     \\
@@ -204,52 +205,30 @@ const shader_glsl =
     \\    clr.a = 1.0;
     \\    return clr;
     \\}
-    \\vec4 deptClr(int owner, ivec2 scramble) {
+    \\vec4 ownerDeptClr(int owner, int x, ivec2 scramble) {
     \\    ivec4 usr_limits = ivec4(round(texelFetch(user_texture, ivec2(127,127), 0)*255));
     \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
     \\    int owner_x = owner % 128;
     \\    int owner_y = owner / 128;
     \\    ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
-    \\    float h = float(usr.r) / float(usr_limits.r);
+    \\    float h = float(usr[x]) / float(usr_limits[x]);
     \\    float v = (rand.r*0.15) + 0.6;
     \\    float s = (rand.g*0.45) + 0.35;
-    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
+    \\    vec3 clr = hsv2rgb(vec3(h, s, v));
     \\    return vec4(clr, 1.0);
     \\}
-    \\vec4 divClr(int owner, ivec2 scramble) {
-    \\    ivec4 usr_limits = ivec4(round(texelFetch(user_texture, ivec2(127,127), 0)*255));
+    \\
+    \\vec4 currentUserClr(int owner, ivec2 scramble) {
     \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
-    \\    int owner_x = owner % 128;
-    \\    int owner_y = owner / 128;
-    \\    ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
-    \\    float h = float(usr.g) / float(usr_limits.g);
-    \\    float v = (rand.r*0.15) + 0.6;
-    \\    float s = (rand.g*0.45) + 0.35;
-    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
-    \\    return vec4(clr, 1.0);
-    \\}
-    \\vec4 subClr(int owner, ivec2 scramble) {
-    \\    ivec4 usr_limits = ivec4(round(texelFetch(user_texture, ivec2(127,127), 0)*255));
-    \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
-    \\    int owner_x = owner % 128;
-    \\    int owner_y = owner / 128;
-    \\    ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
-    \\    float h = float(usr.b) / float(usr_limits.b);
-    \\    float v = (rand.r*0.15) + 0.6;
-    \\    float s = (rand.g*0.45) + 0.35;
-    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
-    \\    return vec4(clr, 1.0);
-    \\}
-    \\vec4 unitClr(int owner, ivec2 scramble) {
-    \\    ivec4 usr_limits = ivec4(round(texelFetch(user_texture, ivec2(127,127), 0)*255));
-    \\    vec4 rand = texelFetch(rand_texture, scramble, 0);
-    \\    int owner_x = owner % 128;
-    \\    int owner_y = owner / 128;
-    \\    ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
-    \\    float h = float(usr.a) / float(usr_limits.a);
-    \\    float v = (rand.r*0.15) + 0.6;
-    \\    float s = (rand.g*0.45) + 0.35;
-    \\    vec3 clr = hsv2rgb(vec3(h, v, s));
+    \\    float h = 0.0;
+    \\    float v = (rand.r*0.15) + 0.1;
+    \\    float s = 0.0;
+    \\    if (owner == current_user) {
+    \\        h = 0.15;
+    \\        v = (rand.r*0.15) + 0.6;
+    \\        s = (rand.g*0.25) + 0.55;
+    \\    }
+    \\    vec3 clr = hsv2rgb(vec3(h, s, v));
     \\    return vec4(clr, 1.0);
     \\}
     \\
@@ -285,14 +264,10 @@ const shader_glsl =
     \\        finalColor = jidClr(jid);
     \\    } else if (mode == 2) {
     \\        finalColor = ownerClr(owner);
-    \\    } else if (mode == 3) {
-    \\        finalColor = deptClr(owner, scramble);
-    \\    } else if (mode == 4) {
-    \\        finalColor = divClr(owner, scramble);
-    \\    } else if (mode == 5) {
-    \\        finalColor = subClr(owner, scramble);
-    \\    } else if (mode == 6) {
-    \\        finalColor = unitClr(owner, scramble);
+    \\    } else if (mode > 2 && mode < 7) {
+    \\        finalColor = ownerDeptClr(owner, mode-3, scramble);
+    \\    } else if (mode == 7) {
+    \\        finalColor = currentUserClr(owner, scramble);
     \\    }
     \\    finalColor.a = 1.0;
     \\    finalColor = pow(finalColor, vec4(0.4545)) * active;
@@ -382,6 +357,12 @@ pub fn main() anyerror!void {
 
     // TODO fix mbuffer leak
 
+    var user_name = std.os.getenv("USER");
+    var uid: i32 = 128 * 128 - 1;
+    if (user_name != null) {
+        uid = @intCast(i32, user_map.getUid(user_name.?) orelse (128 * 128 - 1));
+    }
+
     // Seed the random number generator
     var prng = std.rand.DefaultPrng.init(42);
     const rand = prng.random();
@@ -400,6 +381,7 @@ pub fn main() anyerror!void {
     var usr_tex_loc = ray.GetShaderLocation(shader, "user_texture");
     var rnd_tex_loc = ray.GetShaderLocation(shader, "rand_texture");
     var mode_uni_loc = ray.GetShaderLocation(shader, "mode");
+    var user_uni_loc = ray.GetShaderLocation(shader, "current_user");
 
     var tex_pixels: []ray.Color = undefined;
 
@@ -482,6 +464,7 @@ pub fn main() anyerror!void {
         ray.SetShaderValueTexture(shader, usr_tex_loc, usr_tex);
         ray.SetShaderValueTexture(shader, rnd_tex_loc, rnd_tex);
         ray.SetShaderValue(shader, mode_uni_loc, &mode, ray.SHADER_UNIFORM_INT);
+        ray.SetShaderValue(shader, user_uni_loc, &uid, ray.SHADER_UNIFORM_INT);
         ray.DrawTextureTiled(
             tex,
             .{ .x = 0, .y = 0, .width = res_x, .height = res_y },
@@ -584,10 +567,10 @@ pub fn main() anyerror!void {
 
         // Debugging pause, still keeps running in background
         if (ray.IsKeyPressed(32)) paused = !paused;
-        if (ray.IsKeyPressed(262)) mode = @mod(mode + 1, 7);
+        if (ray.IsKeyPressed(262)) mode = @mod(mode + 1, 8);
         if (ray.IsKeyPressed(263)) {
             mode -= 1;
-            if (mode < 0) mode = 7 + mode;
+            if (mode < 0) mode = 8 + mode;
         }
         //std.debug.print("{}\n", .{ray.GetKeyPressed()});
         //std.debug.print("{}\n", .{mode});
