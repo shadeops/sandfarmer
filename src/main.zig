@@ -167,6 +167,8 @@ fn encodeColor(rand: std.rand.Random, msg: mbox.Msg) ray.Color {
     clr.b |= (@intCast(u8, @enumToInt(msg.msg)) << 6);
 
     clr.a = @intCast(u8, msg.owner & 0b1111_1111);
+
+    // Stone == {0,0,0,255} (inactive but with alpha)
     return clr;
 }
 
@@ -194,12 +196,12 @@ fn drawColor(pixels: []ray.Color, clr: ray.Color) void {
 
 fn createSectionBarriers(pixels: []ray.Color) void {
     if (sections < 2) return;
-    var section_gap = res_x/sections;
+    var section_gap = res_x / sections;
     var x: usize = section_gap;
     while (x < res_x) : (x += section_gap) {
         var y: usize = res_y - barrier_height;
         while (y < res_y) : (y += 1) {
-            pixels[res_x * y + x-1] = stone;
+            pixels[res_x * y + x - 1] = stone;
         }
     }
 }
