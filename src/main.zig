@@ -21,7 +21,7 @@ const urls = [_][]const u8{
 };
 
 const user_url = "http://127.0.0.1:3001/whoswho";
-
+const log_level = ray.LOG_ERROR;
 const fps: i32 = 60;
 const res_x: u32 = 320;
 const res_y: u32 = 240;
@@ -242,7 +242,7 @@ pub fn main() anyerror!void {
     var prng = std.rand.DefaultPrng.init(42);
     const rand = prng.random();
 
-    ray.SetTraceLogLevel(ray.LOG_DEBUG);
+    ray.SetTraceLogLevel(log_level);
     //ray.SetConfigFlags(ray.FLAG_MSAA_4X_HINT);
     ray.InitWindow(win_x, win_y, "sandfarm");
     ray.SetWindowState(ray.FLAG_WINDOW_ALWAYS_RUN);
