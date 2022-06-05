@@ -36,7 +36,7 @@ const debug = false;
 
 fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) bool {
     var ret = false;
-    var row: u32 = res_y - 1;
+    var row: u32 = res_y;
     while (row > 0) {
         row -= 1;
         var x: u32 = 0; // counter
@@ -54,6 +54,8 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                 if (erase) pixels[i] = ray.BLANK;
                 continue;
             }
+
+            if (row == res_y-1) continue;
 
             var below = i + res_x;
             if ((pixels[below].r & 0b1) == 0) {
