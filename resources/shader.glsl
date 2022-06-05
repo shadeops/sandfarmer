@@ -37,15 +37,15 @@ vec4 statusClr(int status, ivec2 scramble) {
     if (status > 2) return vec4(0.9, 0.16, 0.22, 1.0);
 
     vec4 rand = texelFetch(rand_texture, scramble, 0);
-    float v = (rand.r*0.15) + 0.6;
-    float s = (rand.g*0.45) + 0.35;
     float h = 0.0;
+    float s = (rand.g*0.3) + 0.5;
+    float v = (rand.r*0.3) + 0.4;
     if (status == 0) {
       h = 0.35;
     } else if (status == 1) {
-      h = 0.60;
+      h = 0.65;
     } else if (status == 2) {
-       h += 0.14;
+       h += 0.125;
     }
 
     vec3 clr = hsv2rgb(vec3(h, s, v));
@@ -73,8 +73,8 @@ vec4 ownerDeptClr(int owner, int x, ivec2 scramble) {
     int owner_y = owner / 128;
     ivec4 usr = ivec4(round(texelFetch(user_texture, ivec2(owner_x, owner_y), 0)*255));
     float h = float(usr[x]) / float(usr_limits[x]);
-    float v = (rand.r*0.15) + 0.6;
-    float s = (rand.g*0.45) + 0.35;
+    float s = (rand.g*0.2) + 0.45;
+    float v = (rand.r*0.35) + 0.35;
     vec3 clr = hsv2rgb(vec3(h, s, v));
     return vec4(clr, 1.0);
 }
@@ -82,12 +82,12 @@ vec4 ownerDeptClr(int owner, int x, ivec2 scramble) {
 vec4 currentUserClr(int owner, ivec2 scramble) {
     vec4 rand = texelFetch(rand_texture, scramble, 0);
     float h = 0.0;
-    float v = (rand.r*0.15) + 0.1;
     float s = 0.0;
+    float v = (rand.r*0.15) + 0.1;
     if (owner == current_user) {
         h = 0.15;
-        v = (rand.r*0.15) + 0.6;
         s = (rand.g*0.25) + 0.55;
+        v = (rand.r*0.15) + 0.6;
     }
     vec3 clr = hsv2rgb(vec3(h, s, v));
     return vec4(clr, 1.0);
@@ -133,7 +133,7 @@ void main()
     finalColor.a = 1.0;
     finalColor = pow(finalColor, vec4(0.4545)) * active;
     vec4 white = vec4(1.0);
-    if (texelColor == white) {
+    if (texelColor.a == 1.0 && active == 0) {
       finalColor = vec4(0.7,0.7,0.7,1.0);
     }
 }

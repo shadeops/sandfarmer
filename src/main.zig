@@ -31,6 +31,10 @@ const win_y: u32 = res_y * window_scale;
 const sections: u32 = 4;
 const fade_duration: u8 = 120;
 const drain_steps: u32 = 360;
+const barrier_height: u32 = 200;
+const height_limit: u32 = 10;
+
+const stone = ray.Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
 const debug = false;
 
@@ -49,16 +53,15 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
             col = if (decreasing_row) (res_x - x) - 1 else x;
             i = row * res_x + col;
 
-            if ((pixels[i].r & 0b1) == 0) continue;
-            if (pixels[i].r == 255 and pixels[i].g == 255 and pixels[i].b == 255 and pixels[i].a == 255) {
+            if (pixels[i].r & 0b01 == 0) {
                 if (erase) pixels[i] = ray.BLANK;
                 continue;
             }
 
-            if (row == res_y-1) continue;
+            if (row == res_y - 1) continue;
 
             var below = i + res_x;
-            if ((pixels[below].r & 0b1) == 0) {
+            if ((pixels[below].r & 0b1) == 0 and pixels[below].a != 255) {
                 if (debug) std.debug.print("Moving {} below to {}\n", .{ i, below });
                 pixels[below] = pixels[i];
                 pixels[i] = ray.BLANK;
@@ -75,7 +78,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != 0 and (pixels[l_below].r & 0b1) == 0) {
+                if (col != 0 and (pixels[l_below].r & 0b1) == 0 and pixels[l_below].a != 255) {
                     if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -86,7 +89,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != res_x - 1 and (pixels[r_below].r & 0b1) == 0) {
+                if (col != res_x - 1 and (pixels[r_below].r & 0b1) == 0 and pixels[r_below].a != 255) {
                     if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -98,7 +101,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if ((col != res_x - 1) and (pixels[r_below].r & 0b1) == 0) {
+                if ((col != res_x - 1) and (pixels[r_below].r & 0b1) == 0 and pixels[r_below].a != 255) {
                     if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -109,14 +112,14 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != 0 and (pixels[l_below].r & 0b1) == 0) {
+                if (col != 0 and (pixels[l_below].r & 0b1) == 0 and pixels[l_below].a != 255) {
                     if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
                     continue;
                 }
             }
-            if (row < 10) {
+            if (row < height_limit) {
                 ret = true;
             }
         }
@@ -187,6 +190,18 @@ fn drawColor(pixels: []ray.Color, clr: ray.Color) void {
     drawPixel(pixels, clr, x - 1, y);
     drawPixel(pixels, clr, x, y + 1);
     drawPixel(pixels, clr, x, y - 1);
+}
+
+fn createSectionBarriers(pixels: []ray.Color) void {
+    if (sections < 2) return;
+    var section_gap = res_x/sections;
+    var x: usize = section_gap;
+    while (x < res_x) : (x += section_gap) {
+        var y: usize = res_y - barrier_height;
+        while (y < res_y) : (y += 1) {
+            pixels[res_x * y + x-1] = stone;
+        }
+    }
 }
 
 pub fn main() anyerror!void {
@@ -454,10 +469,7 @@ pub fn main() anyerror!void {
                 var offset_start = (res_x * res_y - 1);
                 if (rand.float(f32) > 0.5) {
                     var pixel_offset = offset_start - pix;
-                    if (pixels[pixel_offset].r != 255 and
-                        pixels[pixel_offset].g != 255 and
-                        pixels[pixel_offset].b != 255 and
-                        pixels[pixel_offset].a != 255)
+                    if (pixels[pixel_offset].r & 0b1 == 1)
                         pixels[pixel_offset] = ray.BLANK;
                 }
             }
@@ -469,7 +481,7 @@ pub fn main() anyerror!void {
 
         // Draw / erase pixels
         if (ray.IsMouseButtonDown(0)) {
-            drawColor(pixels[0..], ray.WHITE);
+            drawColor(pixels[0..], stone);
         } else if (ray.IsMouseButtonDown(1)) {
             drawColor(pixels[0..], ray.BLANK);
         }
@@ -491,6 +503,10 @@ pub fn main() anyerror!void {
         // Erase any blockers
         if (ray.IsKeyPressed(67)) {
             erase = true;
+        }
+
+        if (ray.IsKeyPressed(83)) {
+            createSectionBarriers(pixels[0..]);
         }
 
         if (ray.IsKeyDown(68)) {
