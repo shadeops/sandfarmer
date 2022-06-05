@@ -200,23 +200,6 @@ pub fn main() anyerror!void {
     var allocator = gpa.allocator();
     var user_map = try users.queryUsers(allocator, user_url);
     defer user_map.deinit();
-    std.debug.print("{}\n", .{user_map.users[user_map.users.len - 1]});
-
-    var uid_iter = user_map.uid_map.keyIterator();
-    while (uid_iter.next()) |k| {
-        std.debug.print("{s}\n", .{user_map.getKey(k.*)});
-    }
-
-    // Start data gathering
-    //var ctxs = [_]randmsgs.Context{.{}} ** sections;
-    //for (ctxs) |*ctx, i| {
-    //    ctx.prng = std.rand.DefaultPrng.init(i).random();
-    //    _ = try ctx.startThread();
-    //}
-    //ctxs[0].size = 1;
-    //ctxs[1].size = 10;
-    //ctxs[2].size = 20;
-    //ctxs[3].size = 50;
 
     var ctxs = [_]tractor.Context{undefined} ** sections;
     for (ctxs) |*ctx, i| {
@@ -237,7 +220,7 @@ pub fn main() anyerror!void {
     var user_name = std.os.getenv("USER");
     var uid: i32 = 128 * 128 - 1;
     if (user_name != null) {
-        uid = @intCast(i32, user_map.getUid(user_name.?) orelse (128 * 128 - 1));
+        uid = @intCast(i32, user_map.getUid(user_name.?) orelse (128 * 128 - 2));
     }
 
     // Seed the random number generator
@@ -475,7 +458,7 @@ pub fn main() anyerror!void {
                         pixels[pixel_offset].g != 255 and
                         pixels[pixel_offset].b != 255 and
                         pixels[pixel_offset].a != 255)
-                        pixels[offset_start - pix] = ray.BLANK;
+                        pixels[pixel_offset] = ray.BLANK;
                 }
             }
         }
