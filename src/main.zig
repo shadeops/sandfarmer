@@ -38,6 +38,10 @@ const stone = ray.Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
 const debug = false;
 
+fn isEmpty(pixel: ray.Color) bool {
+    return (pixel.r & 0b1) == 0 and pixel.a != 255;
+}
+
 fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) bool {
     var ret = false;
     var row: u32 = res_y;
@@ -61,7 +65,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
             if (row == res_y - 1) continue;
 
             var below = i + res_x;
-            if ((pixels[below].r & 0b1) == 0 and pixels[below].a != 255) {
+            if (isEmpty(pixels[below])) {
                 if (debug) std.debug.print("Moving {} below to {}\n", .{ i, below });
                 pixels[below] = pixels[i];
                 pixels[i] = ray.BLANK;
@@ -78,7 +82,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != 0 and (pixels[l_below].r & 0b1) == 0 and pixels[l_below].a != 255) {
+                if (col != 0 and isEmpty(pixels[l_below])) {
                     if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -89,7 +93,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != res_x - 1 and (pixels[r_below].r & 0b1) == 0 and pixels[r_below].a != 255) {
+                if (col != res_x - 1 and isEmpty(pixels[r_below])) {
                     if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -101,7 +105,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if ((col != res_x - 1) and (pixels[r_below].r & 0b1) == 0 and pixels[r_below].a != 255) {
+                if ((col != res_x - 1) and isEmpty(pixels[r_below])) {
                     if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
                     pixels[r_below] = pixels[i];
                     pixels[i] = ray.BLANK;
@@ -112,7 +116,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                     pixels[i] = ray.BLANK;
                     continue;
                 }
-                if (col != 0 and (pixels[l_below].r & 0b1) == 0 and pixels[l_below].a != 255) {
+                if (col != 0 and isEmpty(pixels[l_below])) {
                     if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
                     pixels[l_below] = pixels[i];
                     pixels[i] = ray.BLANK;
