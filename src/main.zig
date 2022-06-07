@@ -45,16 +45,33 @@ fn isEmpty(pixel: ray.Color) bool {
 fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) bool {
     var ret = false;
     var row: u32 = res_y;
+
+    var col_order = [_]u32{0}**res_x;
+    for (col_order) |*col, i| {
+        col.* = @intCast(u32, i);
+    }
+
+    var random_col = rand.boolean();
     while (row > 0) {
         row -= 1;
         var x: u32 = 0; // counter
         var i: u32 = 0; // pixel index
         var col: u32 = 0;
-        var decreasing_row = (rand.float(f32) > 0.5);
 
-        x = 0;
+        // 50% time randomly pick positions to break up artifacts
+        var decreasing_row = rand.boolean();
+
+        if (random_col)
+            shuffle(rand, col_order[0..]);
+
         while (x < res_x) : (x += 1) {
-            col = if (decreasing_row) (res_x - x) - 1 else x;
+
+            if (random_col) {
+                col = col_order[x];
+            } else {
+                col = if (decreasing_row) (res_x - x) - 1 else x;
+            }
+
             i = row * res_x + col;
 
             if (pixels[i].r & 0b01 == 0) {
@@ -72,56 +89,38 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                 continue;
             }
 
-            var l_below = i + res_x - 1;
-            var r_below = i + res_x + 1;
+            var a_below = i + res_x - 1;
+            var b_below = i + res_x + 1;
+            var a_side: u32 = 0;
+            var b_side: u32 = res_x - 1;
+            
+            if (rand.boolean()) {
+                // check right first
+                a_below = i + res_x + 1;
+                b_below = i + res_x - 1;
+                a_side = res_x - 1;
+                b_side = 0;
+            }
 
-            // Check left or right first?
-            if (rand.float(f32) > 0.5) {
-                // Check to the lower left
-                if (!sides and col == 0) {
-                    pixels[i] = ray.BLANK;
-                    continue;
-                }
-                if (col != 0 and isEmpty(pixels[l_below])) {
-                    if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
-                    pixels[l_below] = pixels[i];
-                    pixels[i] = ray.BLANK;
-                    continue;
-                }
-                // Check the lower right
-                if (!sides and col == (res_x - 1)) {
-                    pixels[i] = ray.BLANK;
-                    continue;
-                }
-                if (col != res_x - 1 and isEmpty(pixels[r_below])) {
-                    if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
-                    pixels[r_below] = pixels[i];
-                    pixels[i] = ray.BLANK;
-                    continue;
-                }
-            } else {
-                // Check the lower right
-                if (!sides and col == (res_x - 1)) {
-                    pixels[i] = ray.BLANK;
-                    continue;
-                }
-                if ((col != res_x - 1) and isEmpty(pixels[r_below])) {
-                    if (debug) std.debug.print("Moving {} below right to {}\n", .{ i, r_below });
-                    pixels[r_below] = pixels[i];
-                    pixels[i] = ray.BLANK;
-                    continue;
-                }
-                // Check to the lower left
-                if (!sides and col == 0) {
-                    pixels[i] = ray.BLANK;
-                    continue;
-                }
-                if (col != 0 and isEmpty(pixels[l_below])) {
-                    if (debug) std.debug.print("Moving {} below left to {}\n", .{ i, l_below });
-                    pixels[l_below] = pixels[i];
-                    pixels[i] = ray.BLANK;
-                    continue;
-                }
+            // Check to the a side
+            if (!sides and col == a_side) {
+                pixels[i] = ray.BLANK;
+                continue;
+            }
+            if (col != a_side and isEmpty(pixels[a_below])) {
+                pixels[a_below] = pixels[i];
+                pixels[i] = ray.BLANK;
+                continue;
+            }
+            // Check the b (other) side
+            if (!sides and col == b_side) {
+                pixels[i] = ray.BLANK;
+                continue;
+            }
+            if (col != b_side and isEmpty(pixels[b_below])) {
+                pixels[b_below] = pixels[i];
+                pixels[i] = ray.BLANK;
+                continue;
             }
             if (row < height_limit) {
                 ret = true;
@@ -432,12 +431,6 @@ pub fn main() anyerror!void {
                 var msg = msg_boxes[i].next() orelse break;
                 var x = pool[j];
                 pixels[x + pixel_offset] = encodeColor(rand, msg);
-                //switch (msg.msg) {
-                //    .active => pixels[x + pixel_offset] = ray.LIME,
-                //    .done => pixels[x + pixel_offset] = ray.SKYBLUE,
-                //    .err => pixels[x + pixel_offset] = ray.RED,
-                //    .blocked => pixels[x + pixel_offset] = ray.ORANGE,
-                //}
             }
         }
 
@@ -473,7 +466,7 @@ pub fn main() anyerror!void {
             var pix: u32 = 0;
             while (pix < res_x) : (pix += 1) {
                 var offset_start = (res_x * res_y - 1);
-                if (rand.float(f32) > 0.5) {
+                if (rand.boolean()) {
                     var pixel_offset = offset_start - pix;
                     if (pixels[pixel_offset].r & 0b1 == 1)
                         pixels[pixel_offset] = ray.BLANK;
@@ -525,26 +518,6 @@ pub fn main() anyerror!void {
         //std.debug.print("{}\n", .{ray.GetKeyPressed()});
     }
     // Clean up threads here.
-}
-
-test "pixel_update" {
-    //std.debug.print("\n", .{});
-    var prng = std.rand.DefaultPrng.init(42);
-    const rand = prng.random();
-    var pixels = [_]ray.Color{ray.BLANK} ** (res_x * res_y);
-    pixels[res_x * (res_y - 2) + 5] = ray.WHITE;
-    pixels[res_x * (res_y - 3) + 5] = ray.WHITE;
-    pixels[res_x * (res_y - 4) + 5] = ray.WHITE;
-    try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);
-    _ = update(rand, true, pixels[0..]);
-    try std.testing.expect(pixels[res_x * (res_y - 3) + 5].a == 255);
-    try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);
-    try std.testing.expect(pixels[res_x * (res_y - 1) + 5].a == 255);
-    //std.debug.print("Second update\n", .{});
-    _ = update(rand, true, pixels[0..]);
-    try std.testing.expect(pixels[res_x * (res_y - 1) + 6].a == 255);
-    try std.testing.expect(pixels[res_x * (res_y - 2) + 5].a == 255);
-    try std.testing.expect(pixels[res_x * (res_y - 1) + 5].a == 255);
 }
 
 test "range reminder" {
