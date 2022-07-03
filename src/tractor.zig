@@ -8,23 +8,20 @@ pub const Context = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    msgs: mbox.MessageCounts = .{},
     usermap: *const users.UserMap,
-    mbuffer: mbox.MsgBuffer,
+    msgs: mbox.MsgBuffer,
     ready: bool = false,
     tsid: ?[36:0]u8 = null,
     url: []const u8,
 
-    pub fn getMessages(self: *Self, msg_box: *mbox.MsgBuffer) ?mbox.MessageCounts {
+    pub fn getMessages(self: *Self, msg_box: *mbox.MsgBuffer) bool {
         if (@atomicLoad(bool, &self.ready, .Acquire)) {
-            var msgs = self.msgs;
-            msg_box.copy(self.mbuffer);
-            self.mbuffer.clear();
+            msg_box.copy(self.msgs);
             self.msgs.clear();
             @atomicStore(bool, &self.ready, false, .Release);
-            return msgs;
+            return true;
         }
-        return null;
+        return false;
     }
 
     pub fn startThread(self: *Self) !std.Thread {
@@ -40,19 +37,23 @@ pub const Context = struct {
         while (true) {
             defer std.time.sleep(1 * std.time.ns_per_s);
 
-            var new_msgs = (self.queryTractor(&mqueue) catch |err| switch (err) {
+            var has_msgs = self.queryTractor(&mqueue) catch |err| switch (err) {
                 error.FailedToPerformRequest => continue,
                 else => return err,
-            }) orelse continue;
+            };
+            if (!has_msgs) continue;
 
             /////////////////////////
             // start barrier
-            while (@atomicLoad(bool, &self.ready, .Acquire)) {}
+            while (@atomicLoad(bool, &self.ready, .Acquire)) {
+                // If self.ready is still true it means getMessages hasn't yet
+                // had a chance to run so we spin for a bit
+                std.atomic.spinLoopHint();
+            }
 
-            self.msgs.copy(new_msgs);
             var i: usize = 0;
-            while (!self.mbuffer.isFull() and i < mqueue.items.len) : (i += 1) {
-                _ = try self.mbuffer.append(mqueue.items[i]);
+            while (!self.msgs.isFull() and i < mqueue.items.len) : (i += 1) {
+                _ = try self.msgs.append(mqueue.items[i]);
             }
 
             @atomicStore(bool, &self.ready, true, .Release);
@@ -87,7 +88,7 @@ pub const Context = struct {
         }
     }
 
-    pub fn queryTractor(self: *Self, queue: *std.ArrayList(mbox.Msg)) !?mbox.MessageCounts {
+    pub fn queryTractor(self: *Self, queue: *std.ArrayList(mbox.Msg)) !bool {
         var buf: [128:0]u8 = undefined;
         var post = try std.fmt.bufPrintZ(buf[0..], "q=subscribe&jids=0&tsid={s}", .{self.tsid.?});
         var response = try curl.request(self.allocator, post, self.url);
@@ -100,32 +101,26 @@ pub const Context = struct {
         self: *Self,
         response: std.ArrayList(u8),
         queue: *std.ArrayList(mbox.Msg),
-    ) !?mbox.MessageCounts {
+    ) !bool {
         var p = std.json.Parser.init(self.allocator, false);
         defer p.deinit();
 
         var tree = try p.parse(response.items);
         defer tree.deinit();
 
-        var json_mbox = tree.root.Object.get("mbox") orelse return null;
-
-        var msgs = mbox.MessageCounts{};
+        var json_mbox = tree.root.Object.get("mbox") orelse return false;
 
         for (json_mbox.Array.items) |item| {
             if (std.mem.eql(u8, item.Array.items[0].String, "c")) {
                 var mtype: mbox.MsgType = undefined;
                 if (std.mem.eql(u8, item.Array.items[4].String, "A")) {
                     mtype = .active;
-                    msgs.active += 1;
                 } else if (std.mem.eql(u8, item.Array.items[4].String, "B")) {
                     mtype = .blocked;
-                    msgs.blocked += 1;
                 } else if (std.mem.eql(u8, item.Array.items[4].String, "D")) {
                     mtype = .done;
-                    msgs.done += 1;
                 } else if (std.mem.eql(u8, item.Array.items[4].String, "E")) {
                     mtype = .err;
-                    msgs.err += 1;
                 } else {
                     continue;
                 }
@@ -140,7 +135,7 @@ pub const Context = struct {
             }
         }
 
-        return msgs;
+        return true;
     }
 };
 

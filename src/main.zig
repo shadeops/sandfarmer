@@ -43,10 +43,10 @@ fn isEmpty(pixel: ray.Color) bool {
 }
 
 fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) bool {
-    var ret = false;
+    var is_full = false;
     var row: u32 = res_y;
 
-    var col_order = [_]u32{0}**res_x;
+    var col_order = [_]u32{0} ** res_x;
     for (col_order) |*col, i| {
         col.* = @intCast(u32, i);
     }
@@ -65,7 +65,6 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
             shuffle(rand, col_order[0..]);
 
         while (x < res_x) : (x += 1) {
-
             if (random_col) {
                 col = col_order[x];
             } else {
@@ -93,7 +92,7 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
             var b_below = i + res_x + 1;
             var a_side: u32 = 0;
             var b_side: u32 = res_x - 1;
-            
+
             if (rand.boolean()) {
                 // check right first
                 a_below = i + res_x + 1;
@@ -123,11 +122,11 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
                 continue;
             }
             if (row < height_limit) {
-                ret = true;
+                is_full = true;
             }
         }
     }
-    return ret;
+    return is_full;
 }
 
 /// Alogrithm R
@@ -210,8 +209,6 @@ fn createSectionBarriers(pixels: []ray.Color) void {
 }
 
 pub fn main() anyerror!void {
-    //var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    //defer arena.deinit();
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
         const leaked = gpa.deinit();
@@ -227,7 +224,7 @@ pub fn main() anyerror!void {
             .allocator = std.heap.page_allocator,
             .url = urls[i],
             .usermap = &user_map,
-            .mbuffer = .{
+            .msgs = .{
                 .msgs = try std.heap.page_allocator.alloc(mbox.Msg, (fps * res_x) / sections),
             },
         };
@@ -308,8 +305,11 @@ pub fn main() anyerror!void {
     allocator.free(tex_pixels);
 
     // Set canvas to be blank by default
-    var pixels = [_]ray.Color{ray.BLANK} ** (res_x * res_y);
-    ray.UpdateTexture(tex, &pixels);
+    var pixels = try allocator.alloc(ray.Color, res_x * res_y);
+    defer allocator.free(pixels);
+    for (pixels) |*pixel| pixel.* = ray.BLANK;
+
+    ray.UpdateTexture(tex, pixels.ptr);
 
     // Setup a pool and reservoir to hold our randomly selected
     // pixel placements
@@ -318,7 +318,6 @@ pub fn main() anyerror!void {
         pool[i] = @intCast(u32, i);
     }
     // Setup Message boxes
-    var msgs = [_]mbox.MessageCounts{.{}} ** sections;
     var msg_boxes = [_]mbox.MsgBuffer{.{ .msgs = undefined }} ** sections;
     for (msg_boxes) |*msg_box| {
         msg_box.msgs = try allocator.alloc(mbox.Msg, (fps * res_x) / sections);
@@ -397,16 +396,14 @@ pub fn main() anyerror!void {
         //////////////////////////////
 
         for (ctxs) |*ctx, i| {
-            var ctx_msgs = ctx.getMessages(&msg_boxes[i]);
-            if (ctx_msgs) |msg| {
-                msgs[i].add(msg);
+
+            // Most of the time this will be null
+            if (ctx.getMessages(&msg_boxes[i]))
                 steps[i] = fps;
-            }
 
             if (msg_boxes[i].size == 0 or steps[i] == 0) {
                 continue;
             }
-
             defer steps[i] -= 1;
 
             var msg_pct = @intToFloat(f32, msg_boxes[i].size) / @intToFloat(f32, steps[i]);
@@ -442,7 +439,7 @@ pub fn main() anyerror!void {
         }
 
         if (!paused) {
-            ray.UpdateTexture(tex, &pixels);
+            ray.UpdateTexture(tex, pixels.ptr);
         }
 
         if (drain_step > 0) {
@@ -453,14 +450,6 @@ pub fn main() anyerror!void {
         if (draining) {
             draining = false;
             sides = false;
-
-            // Binned holes
-            // var pix: u32 = 1;
-            // while (pix < res_x) : (pix += 6) {
-            //     pixels[(res_x*res_y)-pix] = ray.BLANK;
-            //     pixels[(res_x*res_y)-(pix+1)] = ray.BLANK;
-            //     pixels[(res_x*res_y)-(pix+2)] = ray.BLANK;
-            // }
 
             // Randomized holes
             var pix: u32 = 0;
@@ -517,7 +506,6 @@ pub fn main() anyerror!void {
 
         //std.debug.print("{}\n", .{ray.GetKeyPressed()});
     }
-    // Clean up threads here.
 }
 
 test "range reminder" {
