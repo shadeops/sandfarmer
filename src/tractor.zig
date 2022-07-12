@@ -33,7 +33,7 @@ pub const Context = struct {
     fn callback(self: *Self) !void {
         var mqueue = std.ArrayList(mbox.Msg).init(self.allocator);
         defer mqueue.deinit();
-        // TODO if the mqueue gets huge, sleep (or ignore msgs for a bit)
+
         while (true) {
             defer std.time.sleep(1 * std.time.ns_per_s);
 

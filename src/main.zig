@@ -221,8 +221,8 @@ fn encodeColor(rand: std.rand.Random, msg: mbox.Msg) ray.Color {
     // 0b11000000
     //  0b00000000 active
     //  0b01000000 done
-    //  0b10000000 blocked 
-    //  0b11000000 err 
+    //  0b10000000 blocked
+    //  0b11000000 err
     clr.b |= (@intCast(u8, @enumToInt(msg.msg)) << 6);
 
     // user 0-255
