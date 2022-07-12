@@ -45,7 +45,7 @@ vec4 statusClr(int status, ivec2 scramble) {
     } else if (status == 1) {
       h = 0.65;
     } else if (status == 2) {
-       h += 0.125;
+       h = 0.125;
     }
 
     vec3 clr = hsv2rgb(vec3(h, s, v));
@@ -134,6 +134,7 @@ void main()
     finalColor = pow(finalColor, vec4(0.4545)) * active;
     vec4 white = vec4(1.0);
     if (texelColor.a == 1.0 && active == 0) {
-      finalColor = vec4(0.7,0.7,0.7,1.0);
+        // stone 
+        finalColor = vec4(0.7,0.7,0.7,1.0);
     }
 }

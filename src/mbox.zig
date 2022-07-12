@@ -1,45 +1,5 @@
 const std = @import("std");
 
-pub const MessageCounts = struct {
-    const Self = @This();
-    active: u32 = 0,
-    blocked: u32 = 0,
-    done: u32 = 0,
-    err: u32 = 0,
-
-    pub fn clear(self: *Self) void {
-        self.active = 0;
-        self.blocked = 0;
-        self.done = 0;
-        self.err = 0;
-    }
-
-    pub fn add(self: *Self, msgs: Self) void {
-        self.active += msgs.active;
-        self.blocked += msgs.blocked;
-        self.done += msgs.done;
-        self.err += msgs.err;
-    }
-
-    pub fn sub(self: *Self, msgs: Self) void {
-        self.active -= msgs.active;
-        self.blocked -= msgs.blocked;
-        self.done -= msgs.done;
-        self.err -= msgs.err;
-    }
-
-    pub fn copy(self: *Self, msgs: Self) void {
-        self.active = msgs.active;
-        self.blocked = msgs.blocked;
-        self.done = msgs.done;
-        self.err = msgs.err;
-    }
-
-    pub fn hasMsgs(self: Self) bool {
-        return (self.active | self.blocked | self.done | self.err) != 0;
-    }
-};
-
 pub const MsgType = enum(u2) {
     active,
     done,
@@ -146,10 +106,8 @@ test "msg_queue" {
     try std.testing.expectEqual(queue.items.len, 32);
     try std.testing.expectEqual(queue.items[0].jid, 0);
     var capacity = queue.capacity;
-    std.debug.print("\n{}\n", .{queue.capacity});
     var new_len = queue.items.len - 20;
     try queue.replaceRange(0, 10, queue.items[20..30]);
-    std.debug.print("{}\n", .{queue.capacity});
     try std.testing.expectEqual(queue.items[0].jid, 20);
     queue.shrinkRetainingCapacity(new_len);
     try std.testing.expectEqual(queue.capacity, capacity);

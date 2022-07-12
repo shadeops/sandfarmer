@@ -14,10 +14,10 @@ const world_png = @embedFile("../resources/map.png");
 const shader_glsl = @embedFile("../resources/shader.glsl");
 
 const urls = [_][]const u8{
-    "http://127.0.0.1:3000/Tractor/monitor",
-    "http://127.0.0.1:3001/Tractor/monitor",
-    "http://127.0.0.1:3002/Tractor/monitor",
-    "http://127.0.0.1:3003/Tractor/monitor",
+    "http://127.0.0.1:3000/Tractor/monitor?min=30&max=200",
+    "http://127.0.0.1:3001/Tractor/monitor?min=20&max=100",
+    "http://127.0.0.1:3002/Tractor/monitor?min=10&max=50",
+    "http://127.0.0.1:3003/Tractor/monitor?min=20&max=100",
 };
 
 const user_url = "http://127.0.0.1:3001/whoswho";
@@ -38,11 +38,53 @@ const stone = ray.Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
 const debug = false;
 
-fn isEmpty(pixel: ray.Color) bool {
-    return (pixel.r & 0b1) == 0 and pixel.a != 255;
-}
+const PixelState = enum {
+    empty,
+    msg,
+    stone,
+};
 
-fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) bool {
+const Grid = struct {
+    const Self = @This();
+    pixels: []ray.Color,
+    state: []PixelState,
+    allocator: std.mem.Allocator,
+
+    fn init(allocator: std.mem.Allocator) !Grid {
+        var grid = Grid{
+            .pixels = try allocator.alloc(ray.Color, res_x * res_y),
+            .state = try allocator.alloc(PixelState, res_x * res_y),
+            .allocator = allocator,
+        };
+        for (grid.pixels) |*pixel| {
+            pixel.* = ray.BLANK;
+        }
+        for (grid.state) |*pixel| {
+            pixel.* = .empty;
+        }
+        return grid;
+    }
+
+    fn deinit(self: *Self) void {
+        self.allocator.free(self.pixels);
+        self.allocator.free(self.state);
+        self.pixels = undefined;
+        self.state = undefined;
+    }
+
+    fn move(self: Self, src: u32, dest: u32) void {
+        self.pixels[dest] = self.pixels[src];
+        self.state[dest] = self.state[src];
+        self.erase(src);
+    }
+
+    fn erase(self: Self, offset: u32) void {
+        self.pixels[offset] = ray.BLANK;
+        self.state[offset] = .empty;
+    }
+};
+
+fn update(rand: std.rand.Random, sides: bool, grid: Grid, erase: bool) bool {
     var is_full = false;
     var row: u32 = res_y;
 
@@ -73,18 +115,19 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
 
             i = row * res_x + col;
 
-            if (pixels[i].r & 0b01 == 0) {
-                if (erase) pixels[i] = ray.BLANK;
+            if (grid.state[i] == .stone) {
+                // If triggered erase any stones
+                if (erase) grid.erase(i);
                 continue;
             }
 
             if (row == res_y - 1) continue;
+            if (grid.state[i] != .msg) continue;
 
             var below = i + res_x;
-            if (isEmpty(pixels[below])) {
+            if (grid.state[below] == .empty) {
                 if (debug) std.debug.print("Moving {} below to {}\n", .{ i, below });
-                pixels[below] = pixels[i];
-                pixels[i] = ray.BLANK;
+                grid.move(i, below);
                 continue;
             }
 
@@ -103,24 +146,23 @@ fn update(rand: std.rand.Random, sides: bool, pixels: []ray.Color, erase: bool) 
 
             // Check to the a side
             if (!sides and col == a_side) {
-                pixels[i] = ray.BLANK;
+                grid.erase(i);
                 continue;
             }
-            if (col != a_side and isEmpty(pixels[a_below])) {
-                pixels[a_below] = pixels[i];
-                pixels[i] = ray.BLANK;
+            if (col != a_side and grid.state[a_below] == .empty) {
+                grid.move(i, a_below);
                 continue;
             }
             // Check the b (other) side
             if (!sides and col == b_side) {
-                pixels[i] = ray.BLANK;
+                grid.erase(i);
                 continue;
             }
-            if (col != b_side and isEmpty(pixels[b_below])) {
-                pixels[b_below] = pixels[i];
-                pixels[i] = ray.BLANK;
+            if (col != b_side and grid.state[b_below] == .empty) {
+                grid.move(i, b_below);
                 continue;
             }
+
             if (row < height_limit) {
                 is_full = true;
             }
@@ -159,51 +201,80 @@ fn encodeColor(rand: std.rand.Random, msg: mbox.Msg) ray.Color {
     var clr = ray.BLANK;
     _ = rand;
     _ = msg;
+    // jid 256-8192
+    // 0b00111110
     clr.r = @intCast(u8, ((msg.jid >> 8) & 0b0001_1111) << 1);
+    // rand
+    // 0b11000000
     clr.r |= (rand.intRangeAtMost(u8, 0, 3) << 6);
+    // active
+    // 0b00000001
     clr.r |= 0b1;
 
+    // jid 0-255
     clr.g = @intCast(u8, msg.jid & 0b1111_1111);
 
+    // user 256-16384
+    // 0b00111111
     clr.b = @intCast(u8, (msg.owner >> 8) & 0b0011_1111);
+    // msg type
+    // 0b11000000
+    //  0b00000000 active
+    //  0b01000000 done
+    //  0b10000000 blocked 
+    //  0b11000000 err 
     clr.b |= (@intCast(u8, @enumToInt(msg.msg)) << 6);
 
+    // user 0-255
     clr.a = @intCast(u8, msg.owner & 0b1111_1111);
 
     // Stone == {0,0,0,255} (inactive but with alpha)
     return clr;
 }
 
-fn drawPixel(pixels: []ray.Color, clr: ray.Color, x: i32, y: i32) void {
+fn drawPixel(
+    grid: Grid,
+    clr: ray.Color,
+    state: PixelState,
+    x: i32,
+    y: i32,
+) void {
     if (x < 0 or y < 0 or x >= res_x or y >= res_y) return;
     var offset = @minimum(
         @intCast(usize, res_x * @intCast(u32, y) + @intCast(u32, x)),
         res_x * res_y - 1,
     );
-    pixels[offset] = clr;
+    grid.pixels[offset] = clr;
+    grid.state[offset] = state;
 }
 
-fn drawColor(pixels: []ray.Color, clr: ray.Color) void {
+fn drawColor(
+    grid: Grid,
+    clr: ray.Color,
+    state: PixelState,
+) void {
     var x: i32 = ray.GetMouseX();
     var y: i32 = ray.GetMouseY();
     if (x < 0 or y < 0 or x >= win_x or y >= win_y) return;
     x = @divFloor(x, window_scale);
     y = @divFloor(y, window_scale);
-    drawPixel(pixels, clr, x, y);
-    drawPixel(pixels, clr, x + 1, y);
-    drawPixel(pixels, clr, x - 1, y);
-    drawPixel(pixels, clr, x, y + 1);
-    drawPixel(pixels, clr, x, y - 1);
+    drawPixel(grid, clr, state, x, y);
+    drawPixel(grid, clr, state, x + 1, y);
+    drawPixel(grid, clr, state, x - 1, y);
+    drawPixel(grid, clr, state, x, y + 1);
+    drawPixel(grid, clr, state, x, y - 1);
 }
 
-fn createSectionBarriers(pixels: []ray.Color) void {
+fn createSectionBarriers(grid: Grid) void {
     if (sections < 2) return;
     var section_gap = res_x / sections;
     var x: usize = section_gap;
     while (x < res_x) : (x += section_gap) {
         var y: usize = res_y - barrier_height;
         while (y < res_y) : (y += 1) {
-            pixels[res_x * y + x - 1] = stone;
+            var pixel_offset = res_x * y + x - 1;
+            grid.pixels[pixel_offset] = stone;
+            grid.state[pixel_offset] = .stone;
         }
     }
 }
@@ -215,17 +286,21 @@ pub fn main() anyerror!void {
         if (leaked) std.debug.print("Leaked\n", .{});
     }
     var allocator = gpa.allocator();
-    var user_map = try users.queryUsers(allocator, user_url);
+    var user_map = users.queryUsers(allocator, user_url) catch {
+        std.log.err("Unable to connect to user database.", .{});
+        return;
+    };
     defer user_map.deinit();
 
     var ctxs = [_]tractor.Context{undefined} ** sections;
     for (ctxs) |*ctx, i| {
+        var ctx_allocator = std.heap.page_allocator;
         ctx.* = .{
-            .allocator = std.heap.page_allocator,
+            .allocator = ctx_allocator,
             .url = urls[i],
             .usermap = &user_map,
             .msgs = .{
-                .msgs = try std.heap.page_allocator.alloc(mbox.Msg, (fps * res_x) / sections),
+                .msgs = try ctx_allocator.alloc(mbox.Msg, (fps * res_x) / sections),
             },
         };
         var thread = try ctx.startThread();
@@ -304,12 +379,10 @@ pub fn main() anyerror!void {
     ray.UpdateTexture(rnd_tex, tex_pixels.ptr);
     allocator.free(tex_pixels);
 
-    // Set canvas to be blank by default
-    var pixels = try allocator.alloc(ray.Color, res_x * res_y);
-    defer allocator.free(pixels);
-    for (pixels) |*pixel| pixel.* = ray.BLANK;
+    var grid = try Grid.init(allocator);
+    defer grid.deinit();
 
-    ray.UpdateTexture(tex, pixels.ptr);
+    ray.UpdateTexture(tex, grid.pixels.ptr);
 
     // Setup a pool and reservoir to hold our randomly selected
     // pixel placements
@@ -427,11 +500,12 @@ pub fn main() anyerror!void {
             while (j < spawn_count) : (j += 1) {
                 var msg = msg_boxes[i].next() orelse break;
                 var x = pool[j];
-                pixels[x + pixel_offset] = encodeColor(rand, msg);
+                grid.pixels[x + pixel_offset] = encodeColor(rand, msg);
+                grid.state[x + pixel_offset] = .msg;
             }
         }
 
-        var needs_draining = update(rand, sides, pixels[0..], erase);
+        var needs_draining = update(rand, sides, grid, erase);
         erase = false;
         sides = true;
         if (needs_draining) {
@@ -439,7 +513,7 @@ pub fn main() anyerror!void {
         }
 
         if (!paused) {
-            ray.UpdateTexture(tex, pixels.ptr);
+            ray.UpdateTexture(tex, grid.pixels.ptr);
         }
 
         if (drain_step > 0) {
@@ -457,8 +531,8 @@ pub fn main() anyerror!void {
                 var offset_start = (res_x * res_y - 1);
                 if (rand.boolean()) {
                     var pixel_offset = offset_start - pix;
-                    if (pixels[pixel_offset].r & 0b1 == 1)
-                        pixels[pixel_offset] = ray.BLANK;
+                    if (grid.state[pixel_offset] == .msg)
+                        grid.erase(pixel_offset);
                 }
             }
         }
@@ -469,9 +543,9 @@ pub fn main() anyerror!void {
 
         // Draw / erase pixels
         if (ray.IsMouseButtonDown(0)) {
-            drawColor(pixels[0..], stone);
+            drawColor(grid, stone, .stone);
         } else if (ray.IsMouseButtonDown(1)) {
-            drawColor(pixels[0..], ray.BLANK);
+            drawColor(grid, ray.BLANK, .empty);
         }
 
         // Debugging pause, still keeps running in background
@@ -494,7 +568,7 @@ pub fn main() anyerror!void {
         }
 
         if (ray.IsKeyPressed(83)) {
-            createSectionBarriers(pixels[0..]);
+            createSectionBarriers(grid);
         }
 
         if (ray.IsKeyDown(68)) {
