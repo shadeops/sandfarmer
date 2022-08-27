@@ -73,7 +73,11 @@ pub const Context = struct {
     fn tractorLogin(self: *Self) !void {
         //std.debug.print("Logging into Tractor\n", .{});
         var buf: [64:0]u8 = undefined;
-        var post = try std.fmt.bufPrintZ(buf[0..], "q=login&user={s}", .{std.os.getenv("USER")});
+        var post = try std.fmt.bufPrintZ(
+            buf[0..],
+            "q=login&user={s}",
+            .{std.os.getenv("USER") orelse ""},
+        );
         var response = try curl.request(self.allocator, post, self.url);
         defer response.deinit();
 

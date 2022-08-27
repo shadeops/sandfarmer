@@ -10,8 +10,8 @@ const ray = @cImport(
     @cInclude("raylib.h"),
 );
 
-const world_png = @embedFile("../resources/map.png");
-const shader_glsl = @embedFile("../resources/shader.glsl");
+const world_png = @embedFile("resources/map.png");
+const shader_glsl = @embedFile("resources/shader.glsl");
 
 const urls = [_][]const u8{
     "http://127.0.0.1:3000/Tractor/monitor?min=30&max=200",
