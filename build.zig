@@ -68,10 +68,10 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("sandfarm", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
-    exe.addIncludeDir("ext/raylib/src");
+    exe.addIncludePath("ext/raylib/src");
     exe.addObjectFile("ext/raylib/build/raylib/libraylib.a");
-    exe.addIncludeDir("ext/curl/include");
-    exe.addLibPath("ext/curl/build/lib");
+    exe.addIncludePath("ext/curl/include");
+    exe.addLibraryPath("ext/curl/build/lib");
     exe.linkSystemLibraryName("curl");
     exe.linkLibC();
     exe.install();
@@ -85,7 +85,7 @@ pub fn build(b: *std.build.Builder) void {
     const exe_tests = b.addTest("src/tests.zig");
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
-    exe_tests.addIncludeDir("ext/raylib/src");
+    exe_tests.addIncludePath("ext/raylib/src");
     exe_tests.addObjectFile("ext/raylib/build/raylib/libraylib.a");
     exe_tests.linkLibC();
 

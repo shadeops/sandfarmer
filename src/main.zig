@@ -199,8 +199,6 @@ fn shuffle(rand: std.rand.Random, r: []u32) void {
 
 fn encodeColor(rand: std.rand.Random, msg: mbox.Msg) ray.Color {
     var clr = ray.BLANK;
-    _ = rand;
-    _ = msg;
     // jid 256-8192
     // 0b00111110
     clr.r = @intCast(u8, ((msg.jid >> 8) & 0b0001_1111) << 1);
