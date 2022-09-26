@@ -13,10 +13,9 @@ in vec2 fragTexCoord;
 in vec4 fragColor;
 
 // Input uniform values
-uniform sampler2D texture0;
-
 uniform sampler2D user_texture;
 uniform sampler2D rand_texture;
+uniform sampler2D state_texture;
 uniform vec4 colDiffuse;
 
 uniform int mode;
@@ -95,7 +94,7 @@ vec4 currentUserClr(int owner, ivec2 scramble) {
 
 void main()
 {
-    vec4 texelColor = texture(texture0, fragTexCoord);
+    vec4 texelColor = texture(state_texture, fragTexCoord);
 
     ivec4 msg = ivec4(round(texelColor * 255));
 

@@ -330,6 +330,7 @@ pub fn main() anyerror!void {
 
     var usr_tex_loc = ray.GetShaderLocation(shader, "user_texture");
     var rnd_tex_loc = ray.GetShaderLocation(shader, "rand_texture");
+    var state_tex_loc = ray.GetShaderLocation(shader, "state_texture");
     var mode_uni_loc = ray.GetShaderLocation(shader, "mode");
     var user_uni_loc = ray.GetShaderLocation(shader, "current_user");
 
@@ -421,6 +422,11 @@ pub fn main() anyerror!void {
         "Division",
         "User's Jobs",
     };
+        
+    ray.SetShaderValueTexture(shader, usr_tex_loc, usr_tex);
+    ray.SetShaderValueTexture(shader, rnd_tex_loc, rnd_tex);
+    ray.SetShaderValueTexture(shader, state_tex_loc, tex);
+    ray.SetShaderValue(shader, user_uni_loc, &uid, ray.SHADER_UNIFORM_INT);
 
     while (!ray.WindowShouldClose()) {
 
@@ -431,20 +437,11 @@ pub fn main() anyerror!void {
         ray.ClearBackground(ray.BLACK);
         ray.DrawTexture(world_tex, 0, 0, ray.WHITE);
         ray.BeginShaderMode(shader);
-        ray.SetShaderValueTexture(shader, usr_tex_loc, usr_tex);
-        ray.SetShaderValueTexture(shader, rnd_tex_loc, rnd_tex);
-        ray.SetShaderValue(shader, mode_uni_loc, &mode, ray.SHADER_UNIFORM_INT);
-        ray.SetShaderValue(shader, user_uni_loc, &uid, ray.SHADER_UNIFORM_INT);
-        ray.DrawTextureTiled(
-            tex,
-            .{ .x = 0, .y = 0, .width = res_x, .height = res_y },
-            .{ .x = 0, .y = 0, .width = win_x, .height = win_y },
-            .{ .x = 0, .y = 0 },
-            0.0,
-            window_scale,
-            ray.WHITE,
-        );
-        ray.EndShaderMode();
+        {
+            defer ray.EndShaderMode();
+            ray.SetShaderValue(shader, mode_uni_loc, &mode, ray.SHADER_UNIFORM_INT);
+            ray.DrawTexture(world_tex, 0, 0, ray.WHITE);
+        }
 
         if (fade_out > 0) {
             ray.DrawText(
